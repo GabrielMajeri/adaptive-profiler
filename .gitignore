@@ -1,0 +1,6 @@
+# Directory for built Rust binaries
+/target/
+# Python virtual environment root
+/.venv/
+# Python cached bytecode
+**/__pycache__/

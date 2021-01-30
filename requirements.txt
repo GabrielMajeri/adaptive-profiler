@@ -1,0 +1,2 @@
+autopep8~>1
+maturin~>0.9
