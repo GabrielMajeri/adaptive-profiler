@@ -1,5 +1,7 @@
 use std::time::{Duration, Instant};
-use std::{cell::RefCell, collections::HashMap, mem};
+use std::{cell::RefCell, mem};
+
+use splay::SplayMap;
 
 use pyo3::{ffi, prelude::*, types::PyString, FromPyPointer};
 
@@ -11,16 +13,16 @@ thread_local! {
 ///
 /// Should be kept in a thread-local variable.
 struct Profiler {
-    start_times: HashMap<String, Instant>,
-    run_times: HashMap<String, Vec<Duration>>,
+    start_times: SplayMap<String, Instant>,
+    run_times: SplayMap<String, Vec<Duration>>,
 }
 
 impl Profiler {
     /// Initializes a new profiler state.
     fn new() -> Self {
         Self {
-            start_times: HashMap::new(),
-            run_times: HashMap::new(),
+            start_times: SplayMap::new(),
+            run_times: SplayMap::new(),
         }
     }
 
@@ -51,15 +53,18 @@ impl Profiler {
         };
 
         let run_time = Instant::now().duration_since(*start_time);
-        self.run_times
-            .entry(name)
-            .or_insert_with(Vec::new)
-            .push(run_time);
+
+        let entry = self.run_times.get_mut(&name);
+        if let Some(fn_run_times) = entry {
+            fn_run_times.push(run_time);
+        } else {
+            self.run_times.insert(name, vec![run_time]);
+        }
     }
 
     /// Prints useful profiling statistics gathered so far.
     fn print_statistics(&self) {
-        for (name, run_times) in self.run_times.iter() {
+        for (name, run_times) in self.run_times.clone().into_iter() {
             let total_run_time: u128 = run_times.iter().map(Duration::as_nanos).sum();
             let number_of_calls = run_times.len();
             let average_run_time = total_run_time / number_of_calls as u128;

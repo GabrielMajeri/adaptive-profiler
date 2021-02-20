@@ -10,6 +10,9 @@ edition = "2018"
 name = "adaptive_profiler"
 crate-type = ["cdylib"]
 
+[dependencies]
+splay = "0.1.8"
+
 [dependencies.pyo3]
 version = "0.13.1"
 features = ["extension-module"]
