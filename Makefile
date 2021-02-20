@@ -9,7 +9,7 @@ lint:
 	cargo clippy
 
 build:
-	maturin develop
+	maturin develop --release
 
 run:
 	python3 ./benchmark.py

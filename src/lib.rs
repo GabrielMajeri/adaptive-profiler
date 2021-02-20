@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
-use std::{cell::RefCell, collections::HashMap};
+use std::{cell::RefCell, collections::HashMap, mem};
 
-use pyo3::prelude::*;
+use pyo3::{ffi, prelude::*, types::PyString, FromPyPointer};
 
 thread_local! {
     static PROFILER: RefCell<Profiler> = RefCell::new(Profiler::new());
@@ -71,26 +71,54 @@ impl Profiler {
     }
 }
 
+const PY_TRACE_CALL: i32 = 0;
+const PY_TRACE_RETURN: i32 = 3;
+
+/// Function called by the Python interpreter whenever a function
+/// is called or returns.
+extern "C" fn profiler_callback(
+    _obj: *mut ffi::PyObject,
+    frame: *mut ffi::PyFrameObject,
+    event: i32,
+    _arg: *mut ffi::PyObject,
+) -> i32 {
+    let gil = Python::acquire_gil();
+    let py = gil.python();
+
+    let frame = unsafe { &*frame };
+    let code = unsafe { &*frame.f_code };
+    let name = unsafe { PyString::from_borrowed_ptr(py, code.co_name) };
+    let name = name.to_str().unwrap();
+
+    match event {
+        PY_TRACE_CALL => PROFILER.with(|p| p.borrow_mut().on_call(name)),
+        PY_TRACE_RETURN => PROFILER.with(|p| p.borrow_mut().on_return(name)),
+        _ => (),
+    }
+
+    0
+}
+
 /// An adaptive Python profiler, implemented in Rust.
 #[pymodule]
 fn adaptive_profiler(_py: Python, m: &PyModule) -> PyResult<()> {
-    /// Function called by the Python interpreter whenever a function
-    /// is called or returns.
-    ///
-    /// Must be of the type of the parameter passed to [`sys.setprofile`](https://docs.python.org/3/library/sys.html#sys.setprofile).
-    #[pyfn(m, "profiler_callback")]
-    #[text_signature = "(frame, event, arg, /)"]
-    fn profiler_callback(frame: &PyAny, event: &str, _arg: &PyAny) -> PyResult<()> {
-        let code = frame.getattr("f_code")?;
-        let name: &str = code.getattr("co_name")?.extract()?;
-
-        match event {
-            "call" => PROFILER.with(|p| p.borrow_mut().on_call(name)),
-            "return" => PROFILER.with(|p| p.borrow_mut().on_return(name)),
-            _ => (),
+    /// Starts the profiler for subsequent code.
+    #[pyfn(m, "enable")]
+    #[text_signature = "(/)"]
+    fn enable() {
+        unsafe {
+            ffi::PyEval_SetProfile(profiler_callback, ffi::Py_None());
         }
+    }
 
-        Ok(())
+    #[pyfn(m, "disable")]
+    #[text_signature = "(/)"]
+    fn disable() {
+        unsafe {
+            #[allow(invalid_value)]
+            let trace_func = mem::transmute(0usize);
+            ffi::PyEval_SetProfile(trace_func, ffi::Py_None());
+        }
     }
 
     #[pyfn(m, "print_statistics")]
