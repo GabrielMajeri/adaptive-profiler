@@ -69,8 +69,8 @@ impl Profiler {
             let number_of_calls = run_times.len();
             let average_run_time = total_run_time / number_of_calls as u128;
             println!(
-                "{}: {} nanoseconds (avg) × {} executions",
-                name, average_run_time, number_of_calls
+                "{}: total {} ns = {} ns (avg) × {} executions",
+                name, total_run_time, average_run_time, number_of_calls
             );
         }
     }

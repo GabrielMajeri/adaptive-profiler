@@ -3,11 +3,12 @@
 from contextlib import contextmanager
 import adaptive_profiler
 import cProfile
+import pstats
 
 from benchmark import matmul, xml
 
 import sys
-from time import time_ns
+from time import perf_counter, time_ns
 
 
 @contextmanager
@@ -40,10 +41,16 @@ with timer('No profiling'):
 
 matmul.verify_result(A, B, C)
 
-cprofiler = cProfile.Profile()
+print()
+
+cprofiler = cProfile.Profile(timer=perf_counter)
 with timer('cProfile'):
     with cprofiler:
         C = matmul.multiply_matrices(A, B)
+
+stats = pstats.Stats(cprofiler)
+stats.sort_stats(pstats.SortKey.TIME)
+stats.print_stats()
 
 matmul.verify_result(A, B, C)
 
@@ -53,7 +60,7 @@ with timer('Adaptive profiler'):
 
 matmul.verify_result(A, B, C)
 
-# adaptive_profiler.print_statistics()
+adaptive_profiler.print_statistics()
 
 # print()
 
