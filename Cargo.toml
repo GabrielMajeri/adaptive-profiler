@@ -10,6 +10,9 @@ edition = "2018"
 name = "adaptive_profiler"
 crate-type = ["cdylib"]
 
+[profile.dev]
+opt-level = 3
+
 [dependencies]
 splay = "0.1.8"
 
