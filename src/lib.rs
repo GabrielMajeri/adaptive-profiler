@@ -8,6 +8,8 @@ use pyo3::{ffi, prelude::*, types::PyString, FromPyPointer, PyObjectProtocol};
 thread_local! {
     static PROFILER: RefCell<Profiler> = RefCell::new(Profiler::new());
 }
+use perfcnt::linux::{HardwareEventType, PerfCounterBuilderLinux};
+use perfcnt::{AbstractPerfCounter, PerfCounter};
 
 #[pyclass(module = "adaptive_profiler")]
 struct FunctionStatistics {
@@ -139,6 +141,14 @@ extern "C" fn profiler_callback(
     0
 }
 
+thread_local! {
+    static CACHE_MISSES_PERFORMANCE_COUNTER: RefCell<PerfCounter> = RefCell::new(
+        PerfCounterBuilderLinux::from_hardware_event(HardwareEventType::CacheMisses)
+            .finish()
+            .expect("Could not create the counter")
+    );
+}
+
 /// An adaptive Python profiler, implemented in Rust.
 #[pymodule]
 fn adaptive_profiler(_py: Python, m: &PyModule) -> PyResult<()> {
@@ -148,6 +158,11 @@ fn adaptive_profiler(_py: Python, m: &PyModule) -> PyResult<()> {
     #[pyfn(m, "enable")]
     #[text_signature = "(/)"]
     fn enable() {
+        CACHE_MISSES_PERFORMANCE_COUNTER.with(|pc| {
+            let pc = pc.borrow();
+            pc.start().expect("Can not start the counter");
+        });
+
         unsafe {
             ffi::PyEval_SetProfile(profiler_callback, ffi::Py_None());
         }
@@ -161,6 +176,13 @@ fn adaptive_profiler(_py: Python, m: &PyModule) -> PyResult<()> {
             let trace_func = mem::transmute(0usize);
             ffi::PyEval_SetProfile(trace_func, ffi::Py_None());
         }
+
+        CACHE_MISSES_PERFORMANCE_COUNTER.with(|pc| {
+            let mut pc = pc.borrow_mut();
+            pc.stop().expect("Can not stop the counter");
+            let res = pc.read().expect("Can not read the counter");
+            println!("Measured {} cache misses.", res);
+        });
     }
 
     #[pyfn(m, "get_statistics")]

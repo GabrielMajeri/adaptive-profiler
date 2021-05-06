@@ -31,6 +31,12 @@ To run the profiler benchmarks, use:
 make run
 ```
 
+In order for statistics such as cache misses to be computed, you need to configure the kernel to give unprivileged programs access to the hardware performance counters:
+
+```sh
+echo '1' | sudo tee /proc/sys/kernel/perf_event_paranoid
+```
+
 ## License
 
 The code is available under the permissive [MIT license](LICENSE.txt).
