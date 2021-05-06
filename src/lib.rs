@@ -3,10 +3,30 @@ use std::{cell::RefCell, mem};
 
 use splay::SplayMap;
 
-use pyo3::{ffi, prelude::*, types::PyString, FromPyPointer};
+use pyo3::{ffi, prelude::*, types::PyString, FromPyPointer, PyObjectProtocol};
 
 thread_local! {
     static PROFILER: RefCell<Profiler> = RefCell::new(Profiler::new());
+}
+
+#[pyclass(module = "adaptive_profiler")]
+struct FunctionStatistics {
+    #[pyo3(get, set)]
+    name: String,
+    #[pyo3(get, set)]
+    num_calls: usize,
+    #[pyo3(get, set)]
+    cumulative_time: u128,
+}
+
+#[pyproto]
+impl PyObjectProtocol for FunctionStatistics {
+    fn __repr__(&self) -> String {
+        format!(
+            "{} ({} calls): {} ns",
+            self.name, self.num_calls, self.cumulative_time
+        )
+    }
 }
 
 /// Current profiler state.
@@ -62,17 +82,32 @@ impl Profiler {
         }
     }
 
+    /// Returns a vector of the profiling statistics gathered so far.
+    fn get_statistics(&self) -> Vec<FunctionStatistics> {
+        self.run_times
+            .clone()
+            .into_iter()
+            .map(|(name, run_times)| {
+                let cumulative_time: u128 = run_times.iter().map(Duration::as_nanos).sum();
+                let num_calls = run_times.len();
+                FunctionStatistics {
+                    name,
+                    cumulative_time,
+                    num_calls,
+                }
+            })
+            .collect()
+    }
+
     /// Prints useful profiling statistics gathered so far.
     fn print_statistics(&self) {
-        for (name, run_times) in self.run_times.clone().into_iter() {
-            let total_run_time: u128 = run_times.iter().map(Duration::as_nanos).sum();
-            let number_of_calls = run_times.len();
-            let average_run_time = total_run_time / number_of_calls as u128;
+        self.get_statistics().into_iter().for_each(|stats| {
+            let average_run_time = stats.cumulative_time / stats.num_calls as u128;
             println!(
-                "{}: total {} ns = {} ns (avg) × {} executions",
-                name, total_run_time, average_run_time, number_of_calls
+                "{}: cumulative {} ns = {} ns (avg) × {} executions",
+                stats.name, stats.cumulative_time, average_run_time, stats.num_calls
             );
-        }
+        })
     }
 }
 
@@ -107,6 +142,8 @@ extern "C" fn profiler_callback(
 /// An adaptive Python profiler, implemented in Rust.
 #[pymodule]
 fn adaptive_profiler(_py: Python, m: &PyModule) -> PyResult<()> {
+    m.add_class::<FunctionStatistics>()?;
+
     /// Starts the profiler for subsequent code.
     #[pyfn(m, "enable")]
     #[text_signature = "(/)"]
@@ -124,6 +161,12 @@ fn adaptive_profiler(_py: Python, m: &PyModule) -> PyResult<()> {
             let trace_func = mem::transmute(0usize);
             ffi::PyEval_SetProfile(trace_func, ffi::Py_None());
         }
+    }
+
+    #[pyfn(m, "get_statistics")]
+    #[text_signature = "(/)"]
+    fn get_statistics() -> Vec<FunctionStatistics> {
+        PROFILER.with(|p| p.borrow().get_statistics())
     }
 
     #[pyfn(m, "print_statistics")]

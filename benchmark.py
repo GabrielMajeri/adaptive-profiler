@@ -1,26 +1,26 @@
 #!/usr/bin/env python3
 
 from contextlib import contextmanager
-import adaptive_profiler
 import cProfile
-import pstats
+from util.cprofile import capture_stats_output, parse
+
+import adaptive_profiler
 
 from benchmark import matmul, xml
 
-import sys
 from time import perf_counter, time_ns
 
 
-@contextmanager
-def timer(label):
-    start_time = time_ns()
-    try:
-        yield
-    finally:
-        end_time = time_ns()
-        total_time = end_time - start_time
-        total_time_ms = total_time / 1_000_000
-        print(f"{label}: {total_time_ms}ms")
+class Timer:
+    def __init__(self, label: str) -> None:
+        self.label = label
+
+    def __enter__(self):
+        self.start_time = time_ns()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.end_time = time_ns()
+        self.total_time = self.end_time - self.start_time
 
 
 @contextmanager
@@ -34,35 +34,57 @@ def profiler():
 
 print("Matrix multiplication")
 
-A, B = matmul.random_matrices(120, 50, 30)
+A, B = matmul.random_matrices(120, 100, 50)
 
-with timer('No profiling'):
+no_profiling_timer = Timer('No profiling')
+with no_profiling_timer:
     C = matmul.multiply_matrices(A, B)
 
 matmul.verify_result(A, B, C)
 
 print()
 
-cprofiler = cProfile.Profile(timer=perf_counter)
-with timer('cProfile'):
-    with cprofiler:
+cprofile_timer = Timer('cProfile')
+profile = cProfile.Profile(timer=perf_counter)
+with cprofile_timer:
+    with profile:
         C = matmul.multiply_matrices(A, B)
-
-stats = pstats.Stats(cprofiler)
-stats.sort_stats(pstats.SortKey.TIME)
-stats.print_stats()
 
 matmul.verify_result(A, B, C)
 
-with timer('Adaptive profiler'):
+print('cProfile stats')
+output = capture_stats_output(profile)
+stats = parse(output)
+for stat in stats:
+    print(stat)
+
+cprofile_stats = [stats[0], stats[1], stats[2]]
+
+print()
+
+adaprof_timer = Timer('Adaptive profiler')
+with adaprof_timer:
     with profiler():
         C = matmul.multiply_matrices(A, B)
 
 matmul.verify_result(A, B, C)
 
-adaptive_profiler.print_statistics()
+print('Adaptive profiler stats')
+stats = adaptive_profiler.get_statistics()
+for stat in stats:
+    print(stat)
 
-# print()
+adaprof_stats = [stats[1], stats[2], stats[0]]
+
+print()
+
+print('Time percentages')
+
+for stat in cprofile_stats:
+    print(f'{stat.name}:', stat.cumulative_time / cprofile_timer.total_time)
+
+for stat in adaprof_stats:
+    print(f'{stat.name}:', stat.cumulative_time / adaprof_timer.total_time)
 
 # print("XML parsing")
 
