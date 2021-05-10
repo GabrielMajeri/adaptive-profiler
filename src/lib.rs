@@ -52,6 +52,12 @@ impl Profiler {
         }
     }
 
+    /// Resets the profiler's internal data structures.
+    fn reset(&mut self) {
+        self.start_times = SplayMap::new();
+        self.run_times = SplayMap::new();
+    }
+
     /// Called when a function is called.
     ///
     /// # Arguments
@@ -202,6 +208,12 @@ fn adaptive_profiler(_py: Python, m: &PyModule) -> PyResult<()> {
     #[text_signature = "(/)"]
     fn print_statistics() {
         PROFILER.with(|p| p.borrow().print_statistics());
+    }
+
+    #[pyfn(m, "reset")]
+    #[text_signature = "(/)"]
+    fn reset() {
+        PROFILER.with(|p| p.borrow_mut().reset());
     }
 
     Ok(())
