@@ -5,11 +5,15 @@ use splay::SplayMap;
 
 use pyo3::{ffi, prelude::*, types::PyString, FromPyPointer, PyObjectProtocol};
 
+#[cfg(feature = "perfcnt")]
+use perfcnt::{
+    linux::{HardwareEventType, PerfCounterBuilderLinux},
+    AbstractPerfCounter, PerfCounter,
+};
+
 thread_local! {
     static PROFILER: RefCell<Profiler> = RefCell::new(Profiler::new());
 }
-use perfcnt::linux::{HardwareEventType, PerfCounterBuilderLinux};
-use perfcnt::{AbstractPerfCounter, PerfCounter};
 
 #[pyclass(module = "adaptive_profiler")]
 struct FunctionStatistics {
@@ -141,6 +145,7 @@ extern "C" fn profiler_callback(
     0
 }
 
+#[cfg(feature = "perfcnt")]
 thread_local! {
     static CACHE_MISSES_PERFORMANCE_COUNTER: RefCell<PerfCounter> = RefCell::new(
         PerfCounterBuilderLinux::from_hardware_event(HardwareEventType::CacheMisses)
@@ -158,6 +163,7 @@ fn adaptive_profiler(_py: Python, m: &PyModule) -> PyResult<()> {
     #[pyfn(m, "enable")]
     #[text_signature = "(/)"]
     fn enable() {
+        #[cfg(feature = "perfcnt")]
         CACHE_MISSES_PERFORMANCE_COUNTER.with(|pc| {
             let pc = pc.borrow();
             pc.start().expect("Can not start the counter");
@@ -177,6 +183,7 @@ fn adaptive_profiler(_py: Python, m: &PyModule) -> PyResult<()> {
             ffi::PyEval_SetProfile(trace_func, ffi::Py_None());
         }
 
+        #[cfg(feature = "perfcnt")]
         CACHE_MISSES_PERFORMANCE_COUNTER.with(|pc| {
             let mut pc = pc.borrow_mut();
             pc.stop().expect("Can not stop the counter");
