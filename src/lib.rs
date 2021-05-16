@@ -1,5 +1,8 @@
-use std::time::{Duration, Instant};
 use std::{cell::RefCell, mem};
+use std::{
+    ptr,
+    time::{Duration, Instant},
+};
 
 use splay::SplayMap;
 
@@ -15,12 +18,58 @@ thread_local! {
     static PROFILER: RefCell<Profiler> = RefCell::new(Profiler::new());
 }
 
+#[derive(Debug, Copy, Clone)]
+struct FunctionDuration {
+    /// Time spent only in the function.
+    total: Duration,
+    /// Time spent between entry into the function until final return.
+    cumulative: Duration,
+}
+
+struct Stopwatch {
+    elapsed: Duration,
+    start: Instant,
+    last: Instant,
+}
+
+impl Stopwatch {
+    fn new() -> Self {
+        Self {
+            elapsed: Duration::ZERO,
+            start: Instant::now(),
+            last: Instant::now(),
+        }
+    }
+
+    fn start(&mut self) {
+        self.elapsed = Duration::ZERO;
+        self.start = Instant::now();
+        self.last = self.start;
+    }
+
+    fn pause(&mut self) {
+        self.elapsed += self.last.elapsed();
+    }
+
+    fn unpause(&mut self) {
+        self.last = Instant::now();
+    }
+
+    fn stop(&mut self) -> FunctionDuration {
+        let cumulative = self.start.elapsed();
+        let total = self.elapsed + self.last.elapsed();
+        FunctionDuration { total, cumulative }
+    }
+}
+
 #[pyclass(module = "adaptive_profiler")]
 struct FunctionStatistics {
     #[pyo3(get, set)]
     name: String,
     #[pyo3(get, set)]
     num_calls: usize,
+    #[pyo3(get, set)]
+    total_time: u128,
     #[pyo3(get, set)]
     cumulative_time: u128,
 }
@@ -29,8 +78,8 @@ struct FunctionStatistics {
 impl PyObjectProtocol for FunctionStatistics {
     fn __repr__(&self) -> String {
         format!(
-            "{} ({} calls): {} ns",
-            self.name, self.num_calls, self.cumulative_time
+            "{} ({} calls): {} ns / {} ns",
+            self.name, self.num_calls, self.total_time, self.cumulative_time
         )
     }
 }
@@ -39,23 +88,23 @@ impl PyObjectProtocol for FunctionStatistics {
 ///
 /// Should be kept in a thread-local variable.
 struct Profiler {
-    start_times: SplayMap<String, Instant>,
-    run_times: SplayMap<String, Vec<Duration>>,
+    stack: Vec<Stopwatch>,
+    times: SplayMap<String, Vec<FunctionDuration>>,
 }
 
 impl Profiler {
     /// Initializes a new profiler state.
     fn new() -> Self {
         Self {
-            start_times: SplayMap::new(),
-            run_times: SplayMap::new(),
+            stack: Vec::with_capacity(1024),
+            times: SplayMap::new(),
         }
     }
 
     /// Resets the profiler's internal data structures.
     fn reset(&mut self) {
-        self.start_times = SplayMap::new();
-        self.run_times = SplayMap::new();
+        self.stack = Vec::with_capacity(1024);
+        self.times = SplayMap::new();
     }
 
     /// Called when a function is called.
@@ -63,9 +112,12 @@ impl Profiler {
     /// # Arguments
     ///
     /// * `name` - Name of the called function.
-    fn on_call(&mut self, name: &str) {
-        let name = name.to_string();
-        self.start_times.insert(name, Instant::now());
+    fn on_call(&mut self, _name: &str) {
+        if let Some(stopwatch) = self.stack.last_mut() {
+            stopwatch.pause();
+        }
+        self.stack.push(Stopwatch::new());
+        self.stack.last_mut().unwrap().start();
     }
 
     /// Called when a function returns.
@@ -74,36 +126,38 @@ impl Profiler {
     ///
     /// * `name` - Name of the returning function.
     fn on_return(&mut self, name: &str) {
-        let name = name.to_string();
-        let start_time = self.start_times.get(&name);
+        // If we're not returning from the top-most function
+        if let Some(mut stopwatch) = self.stack.pop() {
+            // Stop the associated stopwatch
+            let duration = stopwatch.stop();
 
-        let start_time = match start_time {
-            Some(time) => time,
-            // Can happen if we get an early return from the top-level function
-            // which is being profiled.
-            None => return,
-        };
+            // Save the execution time
+            if !self.times.contains_key(name) {
+                self.times.insert(name.to_string(), Vec::new());
+            }
 
-        let run_time = Instant::now().duration_since(*start_time);
+            let times = self.times.get_mut(name).unwrap();
+            times.push(duration);
+        }
 
-        let entry = self.run_times.get_mut(&name);
-        if let Some(fn_run_times) = entry {
-            fn_run_times.push(run_time);
-        } else {
-            self.run_times.insert(name, vec![run_time]);
+        // If we're still have a parent function
+        if let Some(stopwatch) = self.stack.last_mut() {
+            stopwatch.unpause();
         }
     }
 
     /// Returns a vector of the profiling statistics gathered so far.
     fn get_statistics(&self) -> Vec<FunctionStatistics> {
-        self.run_times
+        self.times
             .clone()
             .into_iter()
-            .map(|(name, run_times)| {
-                let cumulative_time: u128 = run_times.iter().map(Duration::as_nanos).sum();
-                let num_calls = run_times.len();
+            .map(|(name, times)| {
+                let total_time = times.iter().map(|d| d.total.as_nanos()).sum();
+                let cumulative_time: u128 = times.iter().map(|d| d.cumulative.as_nanos()).sum();
+                let num_calls = times.len();
                 FunctionStatistics {
                     name,
+                    total_time,
                     cumulative_time,
                     num_calls,
                 }
@@ -134,8 +188,7 @@ extern "C" fn profiler_callback(
     event: i32,
     _arg: *mut ffi::PyObject,
 ) -> i32 {
-    let gil = Python::acquire_gil();
-    let py = gil.python();
+    let py = unsafe { Python::assume_gil_acquired() };
 
     let frame = unsafe { &*frame };
     let code = unsafe { &*frame.f_code };
@@ -186,7 +239,8 @@ fn adaptive_profiler(_py: Python, m: &PyModule) -> PyResult<()> {
         unsafe {
             #[allow(invalid_value)]
             let trace_func = mem::transmute(0usize);
-            ffi::PyEval_SetProfile(trace_func, ffi::Py_None());
+            // TODO: this doesn't work!
+            ffi::PyEval_SetProfile(trace_func, ptr::null_mut());
         }
 
         #[cfg(feature = "perfcnt")]

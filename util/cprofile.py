@@ -10,10 +10,11 @@ from typing import List, NamedTuple
 class FunctionStatistics(NamedTuple):
     name: str
     num_calls: int
+    total_time: int
     cumulative_time: int
 
     def __repr__(self) -> str:
-        return f'{self.name} ({self.num_calls} calls): {self.cumulative_time} ns'
+        return f'{self.name} ({self.num_calls} calls): {self.total_time} ns / {self.cumulative_time} ns'
 
 
 class StdoutCapturer:
@@ -107,10 +108,11 @@ def parse(output: str) -> List[FunctionStatistics]:
         # Remove the parantheses/brackets from the function/method name
         fn_name = fn_name[1:-1]
 
+        total_time_ns = int(total_time * 1_000_000_000)
         cumulative_time_ns = int(cumulative_time * 1_000_000_000)
 
         stats.append(FunctionStatistics(
-            fn_name, num_calls, cumulative_time_ns))
+            fn_name, num_calls, total_time_ns, cumulative_time_ns))
 
     return stats
 
