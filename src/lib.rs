@@ -1,65 +1,23 @@
+use std::ptr;
 use std::{cell::RefCell, mem};
-use std::{
-    ptr,
-    time::{Duration, Instant},
-};
 
 use splay::SplayMap;
 
 use pyo3::{ffi, prelude::*, types::PyString, FromPyPointer, PyObjectProtocol};
 
+mod counter;
+
+mod stopwatch;
+use self::stopwatch::{Statistics, Stopwatch};
+
 #[cfg(feature = "perfcnt")]
-use perfcnt::{
-    linux::{HardwareEventType, PerfCounterBuilderLinux},
-    AbstractPerfCounter, PerfCounter,
-};
+mod perfcnt;
+
+mod time;
+use self::time::TimeCounter;
 
 thread_local! {
     static PROFILER: RefCell<Profiler> = RefCell::new(Profiler::new());
-}
-
-#[derive(Debug, Copy, Clone)]
-struct FunctionDuration {
-    /// Time spent only in the function.
-    total: Duration,
-    /// Time spent between entry into the function until final return.
-    cumulative: Duration,
-}
-
-struct Stopwatch {
-    elapsed: Duration,
-    start: Instant,
-    last: Instant,
-}
-
-impl Stopwatch {
-    fn new() -> Self {
-        Self {
-            elapsed: Duration::ZERO,
-            start: Instant::now(),
-            last: Instant::now(),
-        }
-    }
-
-    fn start(&mut self) {
-        self.elapsed = Duration::ZERO;
-        self.start = Instant::now();
-        self.last = self.start;
-    }
-
-    fn pause(&mut self) {
-        self.elapsed += self.last.elapsed();
-    }
-
-    fn unpause(&mut self) {
-        self.last = Instant::now();
-    }
-
-    fn stop(&mut self) -> FunctionDuration {
-        let cumulative = self.start.elapsed();
-        let total = self.elapsed + self.last.elapsed();
-        FunctionDuration { total, cumulative }
-    }
 }
 
 #[pyclass(module = "adaptive_profiler")]
@@ -88,8 +46,8 @@ impl PyObjectProtocol for FunctionStatistics {
 ///
 /// Should be kept in a thread-local variable.
 struct Profiler {
-    stack: Vec<Stopwatch>,
-    times: SplayMap<String, Vec<FunctionDuration>>,
+    stack: Vec<Stopwatch<TimeCounter>>,
+    times: SplayMap<String, Vec<Statistics<TimeCounter>>>,
 }
 
 impl Profiler {
@@ -116,7 +74,7 @@ impl Profiler {
         if let Some(stopwatch) = self.stack.last_mut() {
             stopwatch.pause();
         }
-        self.stack.push(Stopwatch::new());
+        self.stack.push(Stopwatch::new(TimeCounter));
         self.stack.last_mut().unwrap().start();
     }
 
@@ -204,15 +162,6 @@ extern "C" fn profiler_callback(
     0
 }
 
-#[cfg(feature = "perfcnt")]
-thread_local! {
-    static CACHE_MISSES_PERFORMANCE_COUNTER: RefCell<PerfCounter> = RefCell::new(
-        PerfCounterBuilderLinux::from_hardware_event(HardwareEventType::CacheMisses)
-            .finish()
-            .expect("Could not create the counter")
-    );
-}
-
 /// An adaptive Python profiler, implemented in Rust.
 #[pymodule]
 fn adaptive_profiler(_py: Python, m: &PyModule) -> PyResult<()> {
@@ -222,12 +171,6 @@ fn adaptive_profiler(_py: Python, m: &PyModule) -> PyResult<()> {
     #[pyfn(m, "enable")]
     #[text_signature = "(/)"]
     fn enable() {
-        #[cfg(feature = "perfcnt")]
-        CACHE_MISSES_PERFORMANCE_COUNTER.with(|pc| {
-            let pc = pc.borrow();
-            pc.start().expect("Can not start the counter");
-        });
-
         unsafe {
             ffi::PyEval_SetProfile(profiler_callback, ffi::Py_None());
         }
@@ -242,14 +185,6 @@ fn adaptive_profiler(_py: Python, m: &PyModule) -> PyResult<()> {
             // TODO: this doesn't work!
             ffi::PyEval_SetProfile(trace_func, ptr::null_mut());
         }
-
-        #[cfg(feature = "perfcnt")]
-        CACHE_MISSES_PERFORMANCE_COUNTER.with(|pc| {
-            let mut pc = pc.borrow_mut();
-            pc.stop().expect("Can not stop the counter");
-            let res = pc.read().expect("Can not read the counter");
-            println!("Measured {} cache misses.", res);
-        });
     }
 
     #[pyfn(m, "get_statistics")]
