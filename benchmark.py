@@ -35,7 +35,8 @@ def profiler():
 
 print("Matrix multiplication")
 
-A, B = matmul.random_matrices(120, 100, 50)
+A, B = matmul.random_matrices(100, 30, 40)
+N = 16
 
 no_profiling_timer = Timer('No profiling')
 with no_profiling_timer:
@@ -51,7 +52,8 @@ cprofile_timer = Timer('cProfile')
 profile = cProfile.Profile(timer=perf_counter)
 with cprofile_timer:
     with profile:
-        C = matmul.multiply_matrices(A, B)
+        for _ in range(N):
+            C = matmul.multiply_matrices(A, B)
 
 matmul.verify_result(A, B, C)
 
@@ -69,7 +71,8 @@ print()
 adaprof_timer = Timer('Adaptive profiler')
 with adaprof_timer:
     with profiler():
-        C = matmul.multiply_matrices(A, B)
+        for _ in range(N):
+            C = matmul.multiply_matrices(A, B)
 
 matmul.verify_result(A, B, C)
 
