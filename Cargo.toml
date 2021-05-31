@@ -16,6 +16,7 @@ opt-level = 3
 [dependencies]
 splay = "0.1.8"
 perfcnt = { version = "0.7.1", optional = true }
+string-interner = "0.12.2"
 
 [dependencies.pyo3]
 version = "0.13.2"
