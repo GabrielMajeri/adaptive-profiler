@@ -37,4 +37,4 @@ def multiply_matrices(A, B):
 
 def verify_result(A, B, C):
     "Verifies that the result of multiplying matrices `A` and `B` is equal to `C`"
-    assert np.all(np.array(A) @ np.array(B) == np.array(C))
+    assert np.allclose(np.array(A) @ np.array(B), np.array(C))
