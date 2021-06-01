@@ -35,8 +35,8 @@ def profiler():
 
 print("Matrix multiplication")
 
-A, B = matmul.random_matrices(100, 30, 40)
-N = 16
+A, B = matmul.random_matrices(50, 30, 40)
+N = 64
 
 no_profiling_timer = Timer('No profiling')
 with no_profiling_timer:
@@ -71,8 +71,9 @@ print()
 adaprof_timer = Timer('Adaptive profiler')
 with adaprof_timer:
     with profiler():
-        for _ in range(N):
+        for i in range(N):
             C = matmul.multiply_matrices(A, B)
+            adaptive_profiler.update()
 
 matmul.verify_result(A, B, C)
 
@@ -89,11 +90,20 @@ print()
 print('Time percentages')
 
 print("cProfile:")
+cprofile_total_time = sum(map(lambda s: s.total_time, cprofile_stats))
 for stat in cprofile_stats:
-    print(f'{stat.name}:', stat.total_time / cprofile_timer.total_time)
+    print(f'{stat.name}:', stat.total_time / cprofile_total_time)
 
 print("Adaptive profiler:")
+adaprof_total_time = sum(map(lambda s: s.total_time, adaprof_stats))
 for stat in adaprof_stats:
-    print(f'{stat.name}:', stat.total_time / adaprof_timer.total_time)
+    print(f'{stat.name}:', stat.total_time / adaprof_total_time)
 
 print()
+
+cprofile_overhead = cprofile_timer.total_time / no_profiling_timer.total_time
+base_overhead = adaprof_timer.total_time / no_profiling_timer.total_time
+relative_overhead = adaprof_timer.total_time / cprofile_timer.total_time
+print(f"cProfile vs no profiler: {cprofile_overhead}")
+print(f"Adaptive profiler vs no profiler: {base_overhead}")
+print(f"Adaptive profiler vs cProfile: {relative_overhead}")

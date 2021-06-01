@@ -83,8 +83,14 @@ impl Profiler {
         if let Some(stopwatch) = self.stack.last_mut() {
             stopwatch.unpause();
         }
+    }
 
-        self.blacklist.insert(sym);
+    /// Updates the function blacklist based on collected data.
+    pub fn update(&mut self) {
+        // Add all found functions to the blacklist.
+        // TODO: use the racing algorithm instead
+        let symbols = self.interner.into_iter().map(|(sym, _)| sym);
+        self.blacklist.extend(symbols);
     }
 
     /// Returns a vector of the profiling statistics gathered so far.

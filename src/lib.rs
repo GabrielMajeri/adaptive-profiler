@@ -91,6 +91,12 @@ fn adaptive_profiler(_py: Python, m: &PyModule) -> PyResult<()> {
         }
     }
 
+    #[pyfn(m, "update")]
+    #[text_signature = "(/)"]
+    fn update() {
+        PROFILER.with(|p| p.borrow_mut().update())
+    }
+
     #[pyfn(m, "get_statistics")]
     #[text_signature = "(/)"]
     fn get_statistics() -> Vec<FunctionStatistics> {
