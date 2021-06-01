@@ -1,4 +1,3 @@
-use std::ptr;
 use std::{cell::RefCell, mem};
 
 use pyo3::{ffi, prelude::*, types::PyString, FromPyPointer, PyObjectProtocol};
@@ -88,8 +87,7 @@ fn adaptive_profiler(_py: Python, m: &PyModule) -> PyResult<()> {
         unsafe {
             #[allow(invalid_value)]
             let trace_func = mem::transmute(0usize);
-            // TODO: this doesn't work!
-            ffi::PyEval_SetProfile(trace_func, ptr::null_mut());
+            ffi::PyEval_SetProfile(trace_func, ffi::Py_None());
         }
     }
 
