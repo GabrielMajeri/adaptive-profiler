@@ -8,6 +8,9 @@ lint:
 	cargo fmt
 	cargo clippy
 
+check:
+	cargo check
+
 build:
 	maturin develop
 
