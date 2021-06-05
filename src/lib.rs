@@ -100,13 +100,13 @@ fn adaptive_profiler(_py: Python, m: &PyModule) -> PyResult<()> {
     #[pyfn(m, "get_statistics")]
     #[text_signature = "(/)"]
     fn get_statistics() -> Vec<FunctionStatistics> {
-        PROFILER.with(|p| p.borrow().get_statistics())
+        PROFILER.with(|p| p.borrow_mut().get_statistics())
     }
 
     #[pyfn(m, "print_statistics")]
     #[text_signature = "(/)"]
     fn print_statistics() {
-        PROFILER.with(|p| p.borrow().print_statistics());
+        PROFILER.with(|p| p.borrow_mut().print_statistics());
     }
 
     #[pyfn(m, "reset")]
