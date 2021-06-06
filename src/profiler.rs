@@ -1,51 +1,95 @@
 use std::{
     fs::File,
     io::{self, BufWriter, Write},
+    mem,
 };
 
 use splay::{SplayMap, SplaySet};
 use string_interner::{symbol::SymbolU32, StringInterner};
 
 use crate::{
+    counter::{Counter, IntoU128},
     stopwatch::{Statistics, Stopwatch},
-    time::TimeCounter,
     FunctionStatistics,
 };
+
+pub trait AbstractProfiler {
+    /// Updates the function blacklist based on collected data.
+    fn update(&mut self);
+
+    /// Called when a function is entered.
+    fn on_call(&mut self, name: &str);
+
+    /// Called when a function returns.
+    fn on_return(&mut self, name: &str);
+
+    fn get_statistics(&mut self) -> Vec<FunctionStatistics>;
+}
 
 /// Current profiler state.
 ///
 /// Should be kept in a thread-local variable.
-pub struct Profiler {
+pub struct Profiler<'a, C: Counter> {
+    counter: C,
     interner: StringInterner,
     blacklist: SplaySet<SymbolU32>,
-    stack: Vec<Stopwatch<TimeCounter>>,
-    times: SplayMap<SymbolU32, Vec<Statistics<TimeCounter>>>,
-    previous_times: SplayMap<SymbolU32, Vec<Statistics<TimeCounter>>>,
+    stack: Vec<Stopwatch<'a, C>>,
+    times: SplayMap<SymbolU32, Vec<Statistics<C>>>,
+    previous_times: SplayMap<SymbolU32, Vec<Statistics<C>>>,
 }
 
-impl Profiler {
+impl<'a, C: Counter> Profiler<'a, C> {
     /// Initializes a new profiler state.
-    pub fn new() -> Self {
-        Self {
+    pub fn new(counter: C) -> Box<Self> {
+        let profiler = Self {
+            counter,
             interner: StringInterner::new(),
             blacklist: SplaySet::new(),
             stack: Vec::with_capacity(1024),
             times: SplayMap::new(),
             previous_times: SplayMap::new(),
+        };
+        Box::new(profiler)
+    }
+
+    fn add_to_blacklist(&mut self, symbol: SymbolU32) {
+        let current_times = self.times.remove(&symbol).unwrap_or_default();
+
+        if let Some(previous_times) = self.previous_times.get_mut(&symbol) {
+            previous_times.extend(current_times);
+        } else {
+            self.previous_times.insert(symbol, current_times);
         }
+
+        self.blacklist.insert(symbol);
     }
 
-    /// Resets the profiler's internal data structures.
-    pub fn reset(&mut self) {
-        *self = Self::new();
-    }
+    #[allow(dead_code)]
+    fn dump_times(&self, path: &str) -> io::Result<()> {
+        // Open a file for writing
+        let file = File::create(path)?;
 
-    /// Called when a function is called.
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - Name of the called function.
-    pub fn on_call(&mut self, name: &str) {
+        // Buffer the output
+        let mut file = BufWriter::new(file);
+
+        // Write statistics for each function on a new line
+        for (symbol, values) in self.times.clone().into_iter() {
+            let fn_name = self.interner.resolve(symbol).unwrap();
+
+            writeln!(file, "{}", fn_name)?;
+            for value in values {
+                let value: u128 = value.total.into_u128();
+                write!(file, "{} ", value)?;
+            }
+            writeln!(file)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl<C: Counter> AbstractProfiler for Profiler<'_, C> {
+    fn on_call(&mut self, name: &str) {
         let sym = self.interner.get_or_intern(name);
 
         if self.blacklist.contains(&sym) {
@@ -56,16 +100,13 @@ impl Profiler {
             stopwatch.pause();
         }
 
-        self.stack.push(Stopwatch::new(TimeCounter));
+        // This is safe because we only use a `Profiler` wrapped in a `Box`.
+        let counter = unsafe { mem::transmute(&self.counter) };
+        self.stack.push(Stopwatch::new(counter));
         self.stack.last_mut().unwrap().start();
     }
 
-    /// Called when a function returns.
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - Name of the returning function.
-    pub fn on_return(&mut self, name: &str) {
+    fn on_return(&mut self, name: &str) {
         let sym = self.interner.get_or_intern(name);
 
         if self.blacklist.contains(&sym) {
@@ -92,8 +133,7 @@ impl Profiler {
         }
     }
 
-    /// Updates the function blacklist based on collected data.
-    pub fn update(&mut self) {
+    fn update(&mut self) {
         // No function calls were recorded
         if self.times.is_empty() {
             return;
@@ -116,7 +156,7 @@ impl Profiler {
         let mut stats = Vec::with_capacity(self.interner.len());
 
         for (symbol, values) in self.times.clone().into_iter() {
-            let mut values: Vec<_> = values.into_iter().map(|v| v.total.as_nanos()).collect();
+            let mut values: Vec<_> = values.into_iter().map(|v| v.total.into_u128()).collect();
 
             let mut min = u128::MAX;
             let mut max = u128::MIN;
@@ -197,7 +237,7 @@ impl Profiler {
     }
 
     /// Returns a vector of the profiling statistics gathered so far.
-    pub fn get_statistics(&mut self) -> Vec<FunctionStatistics> {
+    fn get_statistics(&mut self) -> Vec<FunctionStatistics> {
         for (key, _) in self.times.clone().into_iter() {
             self.add_to_blacklist(key);
         }
@@ -207,63 +247,17 @@ impl Profiler {
             .into_iter()
             .map(|(sym, times)| {
                 let name = self.interner.resolve(sym).unwrap().to_owned();
-                let total_time = times.iter().map(|d| d.total.as_nanos()).sum();
-                let cumulative_time: u128 = times.iter().map(|d| d.cumulative.as_nanos()).sum();
+                let total = times.iter().map(|d| d.total.into_u128()).sum();
+                let cumulative = times.iter().map(|d| d.cumulative.into_u128()).sum();
                 let num_calls = times.len();
                 FunctionStatistics {
                     name,
-                    total_time,
-                    cumulative_time,
                     num_calls,
+                    total,
+                    cumulative,
                 }
             })
             .collect()
-    }
-
-    /// Prints useful profiling statistics gathered so far.
-    pub fn print_statistics(&mut self) {
-        self.get_statistics().into_iter().for_each(|stats| {
-            let average_run_time = stats.cumulative_time / stats.num_calls as u128;
-            println!(
-                "{}: cumulative {} ns = {} ns (avg) × {} executions",
-                stats.name, stats.cumulative_time, average_run_time, stats.num_calls
-            );
-        })
-    }
-
-    fn add_to_blacklist(&mut self, symbol: SymbolU32) {
-        let current_times = self.times.remove(&symbol).unwrap_or_default();
-
-        if let Some(previous_times) = self.previous_times.get_mut(&symbol) {
-            previous_times.extend(current_times);
-        } else {
-            self.previous_times.insert(symbol, current_times);
-        }
-
-        self.blacklist.insert(symbol);
-    }
-
-    #[allow(dead_code)]
-    fn dump_times(&self, path: &str) -> io::Result<()> {
-        // Open a file for writing
-        let file = File::create(path)?;
-
-        // Buffer the output
-        let mut file = BufWriter::new(file);
-
-        // Write statistics for each function on a new line
-        for (symbol, values) in self.times.clone().into_iter() {
-            let fn_name = self.interner.resolve(symbol).unwrap();
-
-            writeln!(file, "{}", fn_name)?;
-            for value in values {
-                let value = value.total.as_nanos();
-                write!(file, "{} ", value)?;
-            }
-            writeln!(file)?;
-        }
-
-        Ok(())
     }
 }
 

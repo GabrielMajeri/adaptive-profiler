@@ -10,32 +10,44 @@ mod stopwatch;
 mod perfcnt;
 
 mod time;
+use crate::time::TimeCounter;
 
 mod profiler;
-use self::profiler::Profiler;
+use crate::profiler::{AbstractProfiler, Profiler};
 
 thread_local! {
-    static PROFILER: RefCell<Profiler> = RefCell::new(Profiler::new());
+    static PROFILER: RefCell<Option<Box<dyn AbstractProfiler>>> = RefCell::new(None);
 }
 
-#[pyclass(module = "adaptive_profiler")]
+fn with_profiler<F, R>(f: F) -> R
+where
+    F: FnOnce(&mut dyn AbstractProfiler) -> R,
+{
+    PROFILER.with(|profiler| {
+        let mut profiler = profiler.borrow_mut();
+        let profiler = profiler.as_mut().unwrap();
+        f(profiler.as_mut())
+    })
+}
+
+#[pyclass]
 pub struct FunctionStatistics {
     #[pyo3(get, set)]
     name: String,
     #[pyo3(get, set)]
     num_calls: usize,
     #[pyo3(get, set)]
-    total_time: u128,
+    total: u128,
     #[pyo3(get, set)]
-    cumulative_time: u128,
+    cumulative: u128,
 }
 
 #[pyproto]
 impl PyObjectProtocol for FunctionStatistics {
     fn __repr__(&self) -> String {
         format!(
-            "{} ({} calls): {} ns / {} ns",
-            self.name, self.num_calls, self.total_time, self.cumulative_time
+            "{} ({} calls): {} total / {} cumulative",
+            self.name, self.num_calls, self.total, self.cumulative
         )
     }
 }
@@ -59,8 +71,8 @@ extern "C" fn profiler_callback(
     let name = name.to_str().unwrap();
 
     match event {
-        PY_TRACE_CALL => PROFILER.with(|p| p.borrow_mut().on_call(name)),
-        PY_TRACE_RETURN => PROFILER.with(|p| p.borrow_mut().on_return(name)),
+        PY_TRACE_CALL => with_profiler(|p| p.on_call(name)),
+        PY_TRACE_RETURN => with_profiler(|p| p.on_return(name)),
         _ => (),
     }
 
@@ -76,6 +88,13 @@ fn adaptive_profiler(_py: Python, m: &PyModule) -> PyResult<()> {
     #[pyfn(m, "enable")]
     #[text_signature = "(/)"]
     fn enable() {
+        PROFILER.with(|profiler| {
+            if profiler.borrow().is_some() {
+                panic!("Profiler has already been enabled");
+            }
+            let counter = TimeCounter;
+            profiler.replace(Some(Profiler::new(counter)));
+        });
         unsafe {
             ffi::PyEval_SetProfile(profiler_callback, ffi::Py_None());
         }
@@ -89,30 +108,21 @@ fn adaptive_profiler(_py: Python, m: &PyModule) -> PyResult<()> {
             let trace_func = mem::transmute(0usize);
             ffi::PyEval_SetProfile(trace_func, ffi::Py_None());
         }
+        PROFILER.with(|p| {
+            p.replace(None);
+        });
     }
 
     #[pyfn(m, "update")]
     #[text_signature = "(/)"]
     fn update() {
-        PROFILER.with(|p| p.borrow_mut().update())
+        with_profiler(|p| p.update())
     }
 
     #[pyfn(m, "get_statistics")]
     #[text_signature = "(/)"]
     fn get_statistics() -> Vec<FunctionStatistics> {
-        PROFILER.with(|p| p.borrow_mut().get_statistics())
-    }
-
-    #[pyfn(m, "print_statistics")]
-    #[text_signature = "(/)"]
-    fn print_statistics() {
-        PROFILER.with(|p| p.borrow_mut().print_statistics());
-    }
-
-    #[pyfn(m, "reset")]
-    #[text_signature = "(/)"]
-    fn reset() {
-        PROFILER.with(|p| p.borrow_mut().reset());
+        with_profiler(|p| p.get_statistics())
     }
 
     Ok(())

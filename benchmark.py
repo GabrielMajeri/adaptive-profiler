@@ -95,9 +95,9 @@ for stat in cprofile_stats:
     print(f'{stat.name}:', stat.total_time / cprofile_total_time)
 
 print("Adaptive profiler:")
-adaprof_total_time = sum(map(lambda s: s.total_time, adaprof_stats))
+adaprof_total_time = sum(map(lambda s: s.total, adaprof_stats))
 for stat in adaprof_stats:
-    print(f'{stat.name}:', stat.total_time / adaprof_total_time)
+    print(f'{stat.name}:', stat.total / adaprof_total_time)
 
 print()
 

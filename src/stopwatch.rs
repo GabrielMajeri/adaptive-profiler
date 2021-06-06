@@ -19,16 +19,16 @@ impl<C: Counter> Clone for Statistics<C> {
     }
 }
 
-pub struct Stopwatch<C: Counter> {
-    counter: C,
+pub struct Stopwatch<'a, C: Counter> {
+    counter: &'a C,
     elapsed: C::DifferenceType,
     start: C::ValueType,
     last: C::ValueType,
 }
 
-impl<C: Counter> Stopwatch<C> {
+impl<'a, C: Counter> Stopwatch<'a, C> {
     /// Creates a new stopwatch using the given counter.
-    pub fn new(mut counter: C) -> Self {
+    pub fn new(counter: &'a C) -> Self {
         let start = counter.read();
         Self {
             counter,

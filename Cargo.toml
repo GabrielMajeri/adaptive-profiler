@@ -10,6 +10,9 @@ edition = "2018"
 name = "adaptive_profiler"
 crate-type = ["cdylib"]
 
+[features]
+default = ["perfcnt"]
+
 [profile.dev]
 opt-level = 3
 

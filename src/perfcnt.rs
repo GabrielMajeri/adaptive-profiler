@@ -1,15 +1,23 @@
+use std::cell::UnsafeCell;
+
 use perfcnt::{
     linux::{HardwareEventType, PerfCounterBuilderLinux},
     AbstractPerfCounter, PerfCounter,
 };
 
-use crate::counter::{Counter, Zero};
+use crate::counter::{Counter, IntoU128, Zero};
 
 impl Zero for u64 {
     const ZERO: Self = 0u64;
 }
 
-pub struct HardwarePerformanceCounter(PerfCounter);
+impl IntoU128 for u64 {
+    fn into_u128(self) -> u128 {
+        u128::from(self)
+    }
+}
+
+pub struct HardwarePerformanceCounter(UnsafeCell<PerfCounter>);
 
 impl HardwarePerformanceCounter {
     pub fn new(event: HardwareEventType) -> Self {
@@ -17,19 +25,30 @@ impl HardwarePerformanceCounter {
             .finish()
             .expect("Could not create the counter");
 
-        Self(pc)
+        Self(UnsafeCell::new(pc))
+    }
+
+    fn get(&self) -> &mut PerfCounter {
+        // This is safe because the profiler is thread local
+        unsafe { &mut *self.0.get() }
     }
 
     pub fn start(&self) {
-        self.0.start().expect("Failed to start performance counter");
+        self.get()
+            .start()
+            .expect("Failed to start performance counter");
     }
 
     pub fn reset(&self) {
-        self.0.reset().expect("Failed to reset performance counter");
+        self.get()
+            .reset()
+            .expect("Failed to reset performance counter");
     }
 
     pub fn stop(&self) {
-        self.0.stop().expect("Failed to stop performance counter");
+        self.get()
+            .stop()
+            .expect("Failed to stop performance counter");
     }
 }
 
@@ -43,7 +62,9 @@ impl Counter for HardwarePerformanceCounter {
     type DifferenceType = u64;
     type ValueType = u64;
 
-    fn read(&mut self) -> Self::ValueType {
-        self.0.read().expect("Failed to read performance counter")
+    fn read(&self) -> Self::ValueType {
+        self.get()
+            .read()
+            .expect("Failed to read performance counter")
     }
 }
