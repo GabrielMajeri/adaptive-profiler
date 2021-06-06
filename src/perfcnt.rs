@@ -20,6 +20,14 @@ impl IntoU128 for u64 {
 pub struct HardwarePerformanceCounter(UnsafeCell<PerfCounter>);
 
 impl HardwarePerformanceCounter {
+    pub fn branch_misses() -> Self {
+        Self::new(HardwareEventType::BranchMisses)
+    }
+
+    pub fn cache_misses() -> Self {
+        Self::new(HardwareEventType::CacheMisses)
+    }
+
     pub fn new(event: HardwareEventType) -> Self {
         let pc = PerfCounterBuilderLinux::from_hardware_event(event)
             .finish()

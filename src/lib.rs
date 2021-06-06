@@ -10,7 +10,6 @@ mod stopwatch;
 mod perfcnt;
 
 mod time;
-use crate::time::TimeCounter;
 
 mod profiler;
 use crate::profiler::{AbstractProfiler, Profiler};
@@ -92,7 +91,9 @@ fn adaptive_profiler(_py: Python, m: &PyModule) -> PyResult<()> {
             if profiler.borrow().is_some() {
                 panic!("Profiler has already been enabled");
             }
-            let counter = TimeCounter;
+            let counter = crate::time::TimeCounter;
+            //let counter = crate::perfcnt::HardwarePerformanceCounter::cache_misses();
+            //counter.start();
             profiler.replace(Some(Profiler::new(counter)));
         });
         unsafe {
