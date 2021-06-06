@@ -53,6 +53,8 @@ impl PyObjectProtocol for FunctionStatistics {
 
 const PY_TRACE_CALL: i32 = 0;
 const PY_TRACE_RETURN: i32 = 3;
+// const PY_TRACE_C_CALL: i32 = 4;
+// const PY_TRACE_C_RETURN: i32 = 6;
 
 /// Function called by the Python interpreter whenever a function
 /// is called or returns.
@@ -72,6 +74,8 @@ extern "C" fn profiler_callback(
     match event {
         PY_TRACE_CALL => with_profiler(|p| p.on_call(name)),
         PY_TRACE_RETURN => with_profiler(|p| p.on_return(name)),
+        // PY_TRACE_C_CALL => with_profiler(|p| p.on_call(name)),
+        // PY_TRACE_C_RETURN => with_profiler(|p| p.on_return(name)),
         _ => (),
     }
 
