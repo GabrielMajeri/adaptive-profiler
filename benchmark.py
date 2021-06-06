@@ -40,7 +40,8 @@ N = 64
 
 no_profiling_timer = Timer('No profiling')
 with no_profiling_timer:
-    C = matmul.multiply_matrices(A, B)
+    for _ in range(N):
+        C = matmul.multiply_matrices(A, B)
 
 matmul.verify_result(A, B, C)
 
@@ -71,7 +72,7 @@ print()
 adaprof_timer = Timer('Adaptive profiler')
 with adaprof_timer:
     with profiler():
-        for i in range(N):
+        for _ in range(N):
             C = matmul.multiply_matrices(A, B)
             adaptive_profiler.update()
 
