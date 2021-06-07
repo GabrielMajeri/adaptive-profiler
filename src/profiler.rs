@@ -9,11 +9,12 @@ use string_interner::{symbol::SymbolU32, StringInterner};
 
 use crate::{
     counter::{Counter, IntoU128},
+    lifecycle::Lifecycle,
     stopwatch::{Statistics, Stopwatch},
     FunctionStatistics,
 };
 
-pub trait AbstractProfiler {
+pub trait AbstractProfiler: Lifecycle {
     /// Updates the function blacklist based on collected data.
     fn update(&mut self);
 
@@ -29,7 +30,7 @@ pub trait AbstractProfiler {
 /// Current profiler state.
 ///
 /// Should be kept in a thread-local variable.
-pub struct Profiler<'a, C: Counter> {
+pub struct Profiler<'a, C: Counter + Lifecycle> {
     counter: C,
     interner: StringInterner,
     blacklist: SplaySet<SymbolU32>,
@@ -38,7 +39,7 @@ pub struct Profiler<'a, C: Counter> {
     previous_times: SplayMap<SymbolU32, Vec<Statistics<C>>>,
 }
 
-impl<'a, C: Counter> Profiler<'a, C> {
+impl<'a, C: Counter + Lifecycle> Profiler<'a, C> {
     /// Initializes a new profiler state.
     pub fn new(counter: C) -> Box<Self> {
         let profiler = Self {
@@ -49,6 +50,7 @@ impl<'a, C: Counter> Profiler<'a, C> {
             times: SplayMap::new(),
             previous_times: SplayMap::new(),
         };
+        println!("{}", profiler.interner.len());
         Box::new(profiler)
     }
 
@@ -62,6 +64,15 @@ impl<'a, C: Counter> Profiler<'a, C> {
         }
 
         self.blacklist.insert(symbol);
+    }
+
+    fn record_statistics(&mut self, symbol: SymbolU32, stats: Statistics<C>) {
+        if !self.times.contains_key(&symbol) {
+            self.times.insert(symbol, Vec::new());
+        }
+
+        let times = self.times.get_mut(&symbol).unwrap();
+        times.push(stats);
     }
 
     #[allow(dead_code)]
@@ -88,11 +99,25 @@ impl<'a, C: Counter> Profiler<'a, C> {
     }
 }
 
-impl<C: Counter> AbstractProfiler for Profiler<'_, C> {
-    fn on_call(&mut self, name: &str) {
-        let sym = self.interner.get_or_intern(name);
+impl<C: Counter + Lifecycle> Lifecycle for Profiler<'_, C> {
+    fn enable(&self) {
+        self.counter.enable();
+    }
 
-        if self.blacklist.contains(&sym) {
+    fn disable(&self) {
+        self.counter.disable();
+    }
+
+    fn reset(&self) {
+        self.counter.reset();
+    }
+}
+
+impl<C: Counter + Lifecycle> AbstractProfiler for Profiler<'_, C> {
+    fn on_call(&mut self, name: &str) {
+        let symbol = self.interner.get_or_intern(name);
+
+        if self.blacklist.contains(&symbol) {
             return;
         }
 
@@ -107,24 +132,19 @@ impl<C: Counter> AbstractProfiler for Profiler<'_, C> {
     }
 
     fn on_return(&mut self, name: &str) {
-        let sym = self.interner.get_or_intern(name);
+        let symbol = self.interner.get_or_intern(name);
 
-        if self.blacklist.contains(&sym) {
+        if self.blacklist.contains(&symbol) {
             return;
         }
 
         // If we're not returning from the top-most function
         if let Some(mut stopwatch) = self.stack.pop() {
             // Stop the associated stopwatch
-            let duration = stopwatch.stop();
+            let stats = stopwatch.stop();
 
-            // Save the execution time
-            if !self.times.contains_key(&sym) {
-                self.times.insert(sym, Vec::new());
-            }
-
-            let times = self.times.get_mut(&sym).unwrap();
-            times.push(duration);
+            // Save the execution data
+            self.record_statistics(symbol, stats);
         }
 
         // If we're still have a parent function
@@ -238,6 +258,7 @@ impl<C: Counter> AbstractProfiler for Profiler<'_, C> {
 
     /// Returns a vector of the profiling statistics gathered so far.
     fn get_statistics(&mut self) -> Vec<FunctionStatistics> {
+        // Move all values to the `previous_times` map.
         for (key, _) in self.times.clone().into_iter() {
             self.add_to_blacklist(key);
         }

@@ -5,7 +5,7 @@ import cProfile
 import sys
 from time import perf_counter, time_ns
 
-import adaptive_profiler
+from adaptive_profiler import AdaptiveProfiler
 from benchmark import matmul
 from util.cprofile import capture_stats_output, parse
 
@@ -20,17 +20,6 @@ class Timer:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.end_time = time_ns()
         self.total_time = self.end_time - self.start_time
-
-
-@contextmanager
-def profiler():
-    adaptive_profiler.enable()
-    try:
-        yield
-    finally:
-        adaptive_profiler.disable()
-        # TODO: determine why disable doesn't work
-        sys.setprofile(None)
 
 
 print("Matrix multiplication")
@@ -70,17 +59,18 @@ cprofile_stats = stats
 print()
 
 adaprof_timer = Timer('Adaptive profiler')
+adaprof = AdaptiveProfiler()
 with adaprof_timer:
-    with profiler():
+    with adaprof:
         for _ in range(N):
             C = matmul.multiply_matrices(A, B)
-            adaptive_profiler.update()
+            adaprof.update()
 
 matmul.verify_result(A, B, C)
 
 print(f'Adaptive profiler duration: {adaprof_timer.total_time} ns')
 print('Adaptive profiler stats')
-stats = adaptive_profiler.get_statistics()
+stats = adaprof.get_statistics()
 for stat in stats:
     print(stat)
 

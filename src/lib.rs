@@ -1,6 +1,6 @@
-use std::{cell::RefCell, mem};
+use std::{cell::RefCell, mem, ptr};
 
-use pyo3::{ffi, prelude::*, types::PyString, FromPyPointer, PyObjectProtocol};
+use pyo3::{ffi, prelude::*, types::PyString, FromPyPointer, PyContextProtocol, PyObjectProtocol};
 
 mod lifecycle;
 
@@ -53,6 +53,80 @@ impl PyObjectProtocol for FunctionStatistics {
     }
 }
 
+/// An adaptive Python profiler, implemented in Rust.
+#[pyclass(unsendable)]
+pub struct AdaptiveProfiler {}
+
+#[pymethods]
+impl AdaptiveProfiler {
+    #[new]
+    fn new() -> Self {
+        let counter = crate::time::TimeCounter;
+        //let counter = crate::perfcnt::HardwarePerformanceCounter::cache_misses();
+        //counter.start();
+        let profiler = Profiler::new(counter);
+        PROFILER.with(|p| p.replace(Some(profiler)));
+        Self {}
+    }
+
+    /// Starts the profiler for subsequent code.
+    fn enable(&self) {
+        with_profiler(|profiler| {
+            profiler.enable();
+            unsafe {
+                let profiler_callback = profiler_callback as *const ();
+                let profiler_callback = mem::transmute(profiler_callback);
+                ffi::PyEval_SetProfile(profiler_callback, ffi::Py_None());
+            }
+        });
+    }
+
+    /// Disables the monitoring of further calls.
+    fn disable(&self) {
+        unsafe {
+            #[allow(invalid_value)]
+            let trace_func = mem::transmute(0usize);
+            let null_ptr = ptr::null_mut();
+            ffi::PyEval_SetProfile(trace_func, null_ptr);
+        }
+
+        // TODO: determine why `PyEval_SetProfile` doesn't work
+        Python::with_gil(|py| {
+            let sys = PyModule::import(py, "sys").unwrap();
+            let setprofile = sys.getattr("setprofile").unwrap();
+            setprofile.call0().unwrap();
+        });
+
+        with_profiler(|profiler| profiler.disable());
+    }
+
+    /// Updates the list of functions to be profiled.
+    fn update(&mut self) {
+        with_profiler(|profiler| profiler.update());
+    }
+
+    /// Retrieves statistics for the last profiling run.
+    fn get_statistics(&mut self) -> Vec<FunctionStatistics> {
+        with_profiler(|profiler| profiler.get_statistics())
+    }
+}
+
+#[pyproto]
+impl PyContextProtocol for AdaptiveProfiler {
+    fn __enter__(&mut self) {
+        self.enable();
+    }
+
+    fn __exit__(
+        &mut self,
+        _exc_type: Option<&PyAny>,
+        _exc_value: Option<&PyAny>,
+        _traceback: Option<&PyAny>,
+    ) {
+        self.disable();
+    }
+}
+
 const PY_TRACE_CALL: i32 = 0;
 const PY_TRACE_RETURN: i32 = 3;
 // const PY_TRACE_C_CALL: i32 = 4;
@@ -74,8 +148,8 @@ extern "C" fn profiler_callback(
     let name = name.to_str().unwrap();
 
     match event {
-        PY_TRACE_CALL => with_profiler(|p| p.on_call(name)),
-        PY_TRACE_RETURN => with_profiler(|p| p.on_return(name)),
+        PY_TRACE_CALL => with_profiler(|profiler| profiler.on_call(name)),
+        PY_TRACE_RETURN => with_profiler(|profiler| profiler.on_return(name)),
         // PY_TRACE_C_CALL => with_profiler(|p| p.on_call(name)),
         // PY_TRACE_C_RETURN => with_profiler(|p| p.on_return(name)),
         _ => (),
@@ -84,53 +158,10 @@ extern "C" fn profiler_callback(
     0
 }
 
-/// An adaptive Python profiler, implemented in Rust.
 #[pymodule]
 fn adaptive_profiler(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<FunctionStatistics>()?;
-
-    /// Starts the profiler for subsequent code.
-    #[pyfn(m, "enable")]
-    #[text_signature = "(/)"]
-    fn enable() {
-        PROFILER.with(|profiler| {
-            if profiler.borrow().is_some() {
-                panic!("Profiler has already been enabled");
-            }
-            let counter = crate::time::TimeCounter;
-            //let counter = crate::perfcnt::HardwarePerformanceCounter::cache_misses();
-            //counter.start();
-            profiler.replace(Some(Profiler::new(counter)));
-        });
-        unsafe {
-            ffi::PyEval_SetProfile(profiler_callback, ffi::Py_None());
-        }
-    }
-
-    #[pyfn(m, "disable")]
-    #[text_signature = "(/)"]
-    fn disable() {
-        unsafe {
-            #[allow(invalid_value)]
-            let trace_func = mem::transmute(0usize);
-            ffi::PyEval_SetProfile(trace_func, ffi::Py_None());
-        }
-        PROFILER.with(|p| {
-            p.replace(None);
-        });
-    }
-
-    #[pyfn(m, "update")]
-    #[text_signature = "(/)"]
-    fn update() {
-        with_profiler(|p| p.update())
-    }
-
-    #[pyfn(m, "get_statistics")]
-    #[text_signature = "(/)"]
-    fn get_statistics() -> Vec<FunctionStatistics> {
-        with_profiler(|p| p.get_statistics())
-    }
+    m.add_class::<AdaptiveProfiler>()?;
 
     Ok(())
 }
