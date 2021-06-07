@@ -7,7 +7,10 @@ use perfcnt::{
     AbstractPerfCounter, PerfCounter,
 };
 
-use crate::counter::{Counter, IntoU128, Zero};
+use crate::{
+    counter::{Counter, IntoU128, Zero},
+    lifecycle::Lifecycle,
+};
 
 impl Zero for u64 {
     const ZERO: Self = 0u64;
@@ -42,29 +45,31 @@ impl HardwarePerformanceCounter {
         // This is safe because the profiler is thread local
         unsafe { &mut *self.0.get() }
     }
+}
 
-    pub fn start(&self) {
+impl Lifecycle for HardwarePerformanceCounter {
+    fn enable(&self) {
         self.get()
             .start()
             .expect("Failed to start performance counter");
     }
 
-    pub fn reset(&self) {
-        self.get()
-            .reset()
-            .expect("Failed to reset performance counter");
-    }
-
-    pub fn stop(&self) {
+    fn disable(&self) {
         self.get()
             .stop()
             .expect("Failed to stop performance counter");
+    }
+
+    fn reset(&self) {
+        self.get()
+            .reset()
+            .expect("Failed to reset performance counter");
     }
 }
 
 impl Drop for HardwarePerformanceCounter {
     fn drop(&mut self) {
-        self.stop();
+        self.disable();
     }
 }
 

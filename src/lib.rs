@@ -2,6 +2,8 @@ use std::{cell::RefCell, mem};
 
 use pyo3::{ffi, prelude::*, types::PyString, FromPyPointer, PyObjectProtocol};
 
+mod lifecycle;
+
 mod counter;
 
 mod stopwatch;
