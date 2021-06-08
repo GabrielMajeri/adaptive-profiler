@@ -65,6 +65,7 @@ with adaprof_timer:
         for _ in range(N):
             C = matmul.multiply_matrices(A, B)
             adaprof.update()
+    sys.setprofile(None)
 
 matmul.verify_result(A, B, C)
 

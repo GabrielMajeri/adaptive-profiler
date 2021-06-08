@@ -90,13 +90,6 @@ impl AdaptiveProfiler {
             ffi::PyEval_SetProfile(trace_func, null_ptr);
         }
 
-        // TODO: determine why `PyEval_SetProfile` doesn't work
-        Python::with_gil(|py| {
-            let sys = PyModule::import(py, "sys").unwrap();
-            let setprofile = sys.getattr("setprofile").unwrap();
-            setprofile.call0().unwrap();
-        });
-
         with_profiler(|profiler| profiler.disable());
     }
 
