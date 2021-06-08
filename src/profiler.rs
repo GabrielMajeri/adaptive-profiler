@@ -50,7 +50,6 @@ impl<'a, C: Counter + Lifecycle> Profiler<'a, C> {
             times: SplayMap::new(),
             previous_times: SplayMap::new(),
         };
-        println!("{}", profiler.interner.len());
         Box::new(profiler)
     }
 
@@ -208,52 +207,29 @@ impl<C: Counter + Lifecycle> AbstractProfiler for Profiler<'_, C> {
                 }
             }
 
-            stats.push(FunctionAggregateStatistics { symbol, min, max })
+            let mean = min + (max - min) / 2;
+            stats.push(FunctionAggregateStatistics {
+                symbol,
+                min,
+                max,
+                mean,
+            })
         }
         let stats = stats;
 
-        let mut ordered_by_max = stats.clone();
-        ordered_by_max.sort_unstable_by_key(|s| s.max);
-        let ordered_by_max = ordered_by_max;
+        // Find the function with the smallest average runtime
+        let smallest_runtime = stats.iter().min_by_key(|stats| stats.mean).unwrap();
 
-        let mut ordered_by_min = stats.clone();
-        ordered_by_min.sort_unstable_by_key(|s| s.min);
-        let ordered_by_min = ordered_by_min;
+        let should_blacklist = stats
+            .iter()
+            .filter(|stats| stats.symbol != smallest_runtime.symbol)
+            .all(|stats| smallest_runtime.max < stats.min);
 
-        // for fn_stats in ordered_by_max.iter() {
-        //     let fn_name = self.interner.resolve(fn_stats.symbol).unwrap();
-        //     println!("{} - min: {}, max: {}", fn_name, fn_stats.min, fn_stats.max);
-        // }
-        // for fn_stats in ordered_by_min.iter() {
-        //     let fn_name = self.interner.resolve(fn_stats.symbol).unwrap();
-        //     println!("{} - min: {}, max: {}", fn_name, fn_stats.min, fn_stats.max);
-        // }
-
-        let mut added_to_blacklist = Vec::new();
-        for fn_stats in ordered_by_max.iter() {
-            let first = ordered_by_min
-                .iter()
-                .skip_while(|s| s.symbol == fn_stats.symbol)
-                .next()
-                .unwrap();
-
-            if fn_stats.max <= first.min {
-                self.add_to_blacklist(fn_stats.symbol);
-                added_to_blacklist.push(fn_stats.symbol);
-            } else {
-                break;
-            }
+        if should_blacklist {
+            self.add_to_blacklist(smallest_runtime.symbol);
+            let fn_name = self.interner.resolve(smallest_runtime.symbol).unwrap();
+            println!("Blacklisting {}", fn_name);
         }
-
-        let added_to_blacklist: Vec<_> = added_to_blacklist
-            .into_iter()
-            .map(|s| self.interner.resolve(s).unwrap())
-            .collect();
-
-        println!(
-            "Newly blacklisted functions: {}",
-            added_to_blacklist.join(", ")
-        );
     }
 
     /// Returns a vector of the profiling statistics gathered so far.
@@ -287,4 +263,5 @@ struct FunctionAggregateStatistics {
     symbol: SymbolU32,
     min: u128,
     max: u128,
+    mean: u128,
 }
