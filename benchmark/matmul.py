@@ -38,3 +38,10 @@ def multiply_matrices(A, B):
 def verify_result(A, B, C):
     "Verifies that the result of multiplying matrices `A` and `B` is equal to `C`"
     assert np.allclose(np.array(A) @ np.array(B), np.array(C))
+
+
+if __name__ == '__main__':
+    A, B = random_matrices(50, 30, 40)
+    N = 512
+    for _ in range(N):
+        C = multiply_matrices(A, B)
