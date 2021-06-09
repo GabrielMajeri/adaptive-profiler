@@ -2,5 +2,4 @@
 pub trait Lifecycle {
     fn enable(&self) {}
     fn disable(&self) {}
-    fn reset(&self) {}
 }

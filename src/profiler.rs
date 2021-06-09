@@ -106,10 +106,6 @@ impl<C: Counter + Lifecycle> Lifecycle for Profiler<'_, C> {
     fn disable(&self) {
         self.counter.disable();
     }
-
-    fn reset(&self) {
-        self.counter.reset();
-    }
 }
 
 impl<C: Counter + Lifecycle> AbstractProfiler for Profiler<'_, C> {

@@ -59,12 +59,6 @@ impl Lifecycle for HardwarePerformanceCounter {
             .stop()
             .expect("Failed to stop performance counter");
     }
-
-    fn reset(&self) {
-        self.get()
-            .reset()
-            .expect("Failed to reset performance counter");
-    }
 }
 
 impl Drop for HardwarePerformanceCounter {
