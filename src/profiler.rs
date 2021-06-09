@@ -4,7 +4,9 @@ use std::{
 };
 
 use splay::{SplayMap, SplaySet};
-use string_interner::{symbol::SymbolU32, StringInterner};
+
+type Symbol = string_interner::symbol::SymbolU32;
+type StringInterner = string_interner::StringInterner<Symbol>;
 
 use crate::{
     counter::{Counter, IntoU128},
@@ -32,10 +34,10 @@ pub trait AbstractProfiler: Lifecycle {
 pub struct Profiler<C: Counter + Lifecycle> {
     counter: C,
     interner: StringInterner,
-    blacklist: SplaySet<SymbolU32>,
+    blacklist: SplaySet<Symbol>,
     stack: Vec<Stopwatch<C>>,
-    times: SplayMap<SymbolU32, Vec<Statistics<C>>>,
-    previous_times: SplayMap<SymbolU32, Vec<Statistics<C>>>,
+    times: SplayMap<Symbol, Vec<Statistics<C>>>,
+    previous_times: SplayMap<Symbol, Vec<Statistics<C>>>,
 }
 
 impl<C: Counter + Lifecycle> Profiler<C> {
@@ -51,7 +53,7 @@ impl<C: Counter + Lifecycle> Profiler<C> {
         }
     }
 
-    fn add_to_blacklist(&mut self, symbol: SymbolU32) {
+    fn add_to_blacklist(&mut self, symbol: Symbol) {
         let current_times = self.times.remove(&symbol).unwrap_or_default();
 
         if let Some(previous_times) = self.previous_times.get_mut(&symbol) {
@@ -63,7 +65,7 @@ impl<C: Counter + Lifecycle> Profiler<C> {
         self.blacklist.insert(symbol);
     }
 
-    fn record_statistics(&mut self, symbol: SymbolU32, stats: Statistics<C>) {
+    fn record_statistics(&mut self, symbol: Symbol, stats: Statistics<C>) {
         if !self.times.contains_key(&symbol) {
             self.times.insert(symbol, Vec::new());
         }
@@ -255,7 +257,7 @@ impl<C: Counter + Lifecycle> AbstractProfiler for Profiler<C> {
 
 #[derive(Debug, Copy, Clone)]
 struct FunctionAggregateStatistics {
-    symbol: SymbolU32,
+    symbol: Symbol,
     min: u128,
     max: u128,
     mean: u128,
