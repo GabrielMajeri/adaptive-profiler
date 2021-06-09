@@ -172,7 +172,10 @@ impl<C: Counter + Lifecycle> AbstractProfiler for Profiler<C> {
         let mut stats = Vec::with_capacity(self.interner.len());
 
         for (symbol, values) in self.times.clone().into_iter() {
-            let mut values: Vec<_> = values.into_iter().map(|v| v.total.into_u128()).collect();
+            let mut values: Vec<_> = values
+                .into_iter()
+                .map(|v| v.cumulative.into_u128())
+                .collect();
 
             let mut min = u128::MAX;
             let mut max = u128::MIN;
