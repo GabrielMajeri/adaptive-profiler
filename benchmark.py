@@ -82,14 +82,16 @@ print()
 print('Time percentages')
 
 print("cProfile:")
-cprofile_total_time = sum(map(lambda s: s.total_time, cprofile_stats))
+cprofile_total_time = sum(map(lambda s: s.total, cprofile_stats))
+cprofile_stats.sort(key=lambda s: s.total, reverse=True)
 for stat in cprofile_stats:
-    print(f'{stat.name}:', stat.total_time / cprofile_total_time)
+    print(f'{stat.name}:', stat.cumulative / stat.num_calls)
 
 print("Adaptive profiler:")
 adaprof_total_time = sum(map(lambda s: s.total, adaprof_stats))
+adaprof_stats.sort(key=lambda s: s.total, reverse=True)
 for stat in adaprof_stats:
-    print(f'{stat.name}:', stat.total / adaprof_total_time)
+    print(f'{stat.name}:', stat.cumulative / stat.num_calls)
 
 print()
 

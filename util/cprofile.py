@@ -10,11 +10,11 @@ from typing import List, NamedTuple
 class FunctionStatistics(NamedTuple):
     name: str
     num_calls: int
-    total_time: int
-    cumulative_time: int
+    total: int
+    cumulative: int
 
     def __repr__(self) -> str:
-        return f'{self.name} ({self.num_calls} calls): {self.total_time} ns / {self.cumulative_time} ns'
+        return f'{self.name} ({self.num_calls} calls): {self.total} ns / {self.cumulative} ns'
 
 
 class StdoutCapturer:
