@@ -63,9 +63,8 @@ impl AdaptiveProfiler {
     fn new() -> Self {
         let counter = crate::time::TimeCounter;
         //let counter = crate::perfcnt::HardwarePerformanceCounter::cache_misses();
-        //counter.start();
         let profiler = Profiler::new(counter);
-        PROFILER.with(|p| p.replace(Some(profiler)));
+        PROFILER.with(|p| p.replace(Some(Box::new(profiler))));
         Self {}
     }
 

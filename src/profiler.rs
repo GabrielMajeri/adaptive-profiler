@@ -1,7 +1,6 @@
 use std::{
     fs::File,
     io::{self, BufWriter, Write},
-    mem,
 };
 
 use splay::{SplayMap, SplaySet};
@@ -30,27 +29,26 @@ pub trait AbstractProfiler: Lifecycle {
 /// Current profiler state.
 ///
 /// Should be kept in a thread-local variable.
-pub struct Profiler<'a, C: Counter + Lifecycle> {
+pub struct Profiler<C: Counter + Lifecycle> {
     counter: C,
     interner: StringInterner,
     blacklist: SplaySet<SymbolU32>,
-    stack: Vec<Stopwatch<'a, C>>,
+    stack: Vec<Stopwatch<C>>,
     times: SplayMap<SymbolU32, Vec<Statistics<C>>>,
     previous_times: SplayMap<SymbolU32, Vec<Statistics<C>>>,
 }
 
-impl<'a, C: Counter + Lifecycle> Profiler<'a, C> {
+impl<C: Counter + Lifecycle> Profiler<C> {
     /// Initializes a new profiler state.
-    pub fn new(counter: C) -> Box<Self> {
-        let profiler = Self {
+    pub fn new(counter: C) -> Self {
+        Self {
             counter,
             interner: StringInterner::new(),
             blacklist: SplaySet::new(),
             stack: Vec::with_capacity(1024),
             times: SplayMap::new(),
             previous_times: SplayMap::new(),
-        };
-        Box::new(profiler)
+        }
     }
 
     fn add_to_blacklist(&mut self, symbol: SymbolU32) {
@@ -98,7 +96,7 @@ impl<'a, C: Counter + Lifecycle> Profiler<'a, C> {
     }
 }
 
-impl<C: Counter + Lifecycle> Lifecycle for Profiler<'_, C> {
+impl<C: Counter + Lifecycle> Lifecycle for Profiler<C> {
     fn enable(&self) {
         self.counter.enable();
     }
@@ -108,7 +106,7 @@ impl<C: Counter + Lifecycle> Lifecycle for Profiler<'_, C> {
     }
 }
 
-impl<C: Counter + Lifecycle> AbstractProfiler for Profiler<'_, C> {
+impl<C: Counter + Lifecycle> AbstractProfiler for Profiler<C> {
     fn on_call(&mut self, name: &str) {
         let symbol = self.interner.get_or_intern(name);
 
@@ -116,14 +114,13 @@ impl<C: Counter + Lifecycle> AbstractProfiler for Profiler<'_, C> {
             return;
         }
 
+        let value = self.counter.read();
+
         if let Some(stopwatch) = self.stack.last_mut() {
-            stopwatch.pause();
+            stopwatch.pause(value);
         }
 
-        // This is safe because we only use a `Profiler` wrapped in a `Box`.
-        let counter = unsafe { mem::transmute(&self.counter) };
-        self.stack.push(Stopwatch::new(counter));
-        self.stack.last_mut().unwrap().start();
+        self.stack.push(Stopwatch::new(value));
     }
 
     fn on_return(&mut self, name: &str) {
@@ -133,10 +130,12 @@ impl<C: Counter + Lifecycle> AbstractProfiler for Profiler<'_, C> {
             return;
         }
 
+        let value = self.counter.read();
+
         // If we're not returning from the top-most function
         if let Some(mut stopwatch) = self.stack.pop() {
             // Stop the associated stopwatch
-            let stats = stopwatch.stop();
+            let stats = stopwatch.stop(value);
 
             // Save the execution data
             self.record_statistics(symbol, stats);
@@ -144,7 +143,7 @@ impl<C: Counter + Lifecycle> AbstractProfiler for Profiler<'_, C> {
 
         // If we're still have a parent function
         if let Some(stopwatch) = self.stack.last_mut() {
-            stopwatch.unpause();
+            stopwatch.unpause(value);
         }
     }
 

@@ -19,46 +19,40 @@ impl<C: Counter> Clone for Statistics<C> {
     }
 }
 
-pub struct Stopwatch<'a, C: Counter> {
-    counter: &'a C,
+pub struct Stopwatch<C: Counter> {
     elapsed: C::DifferenceType,
     start: C::ValueType,
     last: C::ValueType,
 }
 
-impl<'a, C: Counter> Stopwatch<'a, C> {
-    /// Creates a new stopwatch using the given counter.
-    pub fn new(counter: &'a C) -> Self {
-        let start = counter.read();
+impl<C: Counter> Stopwatch<C> {
+    /// Creates a new stopwatch and immediately starts it.
+    #[inline]
+    pub fn new(value: C::ValueType) -> Self {
         Self {
-            counter,
             elapsed: C::DifferenceType::ZERO,
-            start,
-            last: start,
+            start: value,
+            last: value,
         }
     }
 
-    /// Starts the stopwatch.
-    pub fn start(&mut self) {
-        self.elapsed = C::DifferenceType::ZERO;
-        self.start = self.counter.read();
-        self.last = self.start;
-    }
-
     /// Temporarily pauses the stopwatch.
-    pub fn pause(&mut self) {
-        self.elapsed = self.elapsed + (self.counter.read() - self.last);
+    #[inline]
+    pub fn pause(&mut self, value: C::ValueType) {
+        self.elapsed = self.elapsed + (value - self.last);
     }
 
     /// Resumses the stopwatch.
-    pub fn unpause(&mut self) {
-        self.last = self.counter.read();
+    #[inline]
+    pub fn unpause(&mut self, value: C::ValueType) {
+        self.last = value;
     }
 
     /// Stops the stopwatch.
-    pub fn stop(&mut self) -> Statistics<C> {
-        let cumulative = self.counter.read() - self.start;
-        let total = self.elapsed + (self.counter.read() - self.last);
+    #[inline]
+    pub fn stop(&mut self, value: C::ValueType) -> Statistics<C> {
+        let cumulative = value - self.start;
+        let total = self.elapsed + (value - self.last);
         Statistics { total, cumulative }
     }
 }
