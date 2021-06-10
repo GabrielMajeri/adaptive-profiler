@@ -82,12 +82,7 @@ impl AdaptiveProfiler {
 
     /// Disables the monitoring of further calls.
     fn disable(&self) {
-        unsafe {
-            #[allow(invalid_value)]
-            let trace_func = mem::transmute(0usize);
-            let null_ptr = ptr::null_mut();
-            ffi::PyEval_SetProfile(trace_func, null_ptr);
-        }
+        disable_profiling_hook();
 
         with_profiler(|profiler| profiler.disable());
     }
@@ -148,6 +143,15 @@ extern "C" fn profiler_callback(
     }
 
     0
+}
+
+fn disable_profiling_hook() {
+    unsafe {
+        #[allow(invalid_value)]
+        let trace_func = mem::MaybeUninit::zeroed().assume_init();
+        let null_ptr = ptr::null_mut();
+        ffi::PyEval_SetProfile(trace_func, null_ptr);
+    }
 }
 
 #[pymodule]

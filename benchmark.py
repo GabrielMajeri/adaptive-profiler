@@ -2,7 +2,6 @@
 
 from contextlib import contextmanager
 import cProfile
-import sys
 from time import perf_counter, time_ns
 
 from adaptive_profiler import AdaptiveProfiler
@@ -65,7 +64,6 @@ with adaprof_timer:
         for _ in range(N):
             C = matmul.multiply_matrices(A, B)
             adaprof.update()
-    sys.setprofile(None)
 
 matmul.verify_result(A, B, C)
 
