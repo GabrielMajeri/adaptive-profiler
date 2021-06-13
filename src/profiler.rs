@@ -9,7 +9,7 @@ type Symbol = string_interner::symbol::SymbolU32;
 type StringInterner = string_interner::StringInterner<Symbol>;
 
 use crate::{
-    counter::{Counter, IntoU128},
+    counter::{Counter, IntoU128, Zero},
     lifecycle::Lifecycle,
     stopwatch::{Statistics, Stopwatch},
     FunctionStatistics,
@@ -25,6 +25,12 @@ pub trait AbstractProfiler: Lifecycle {
     /// Called when a function returns.
     fn on_return(&mut self, name: &str);
 
+    /// Called when a C function is entered.
+    fn on_c_call(&mut self, name: &str);
+
+    /// Called when control is gained back from C code.
+    fn on_c_return(&mut self, name: &str);
+
     fn get_statistics(&mut self) -> Vec<FunctionStatistics>;
 }
 
@@ -38,6 +44,7 @@ pub struct Profiler<C: Counter + Lifecycle> {
     stack: Vec<Stopwatch<C>>,
     times: SplayMap<Symbol, Vec<Statistics<C>>>,
     previous_times: SplayMap<Symbol, Vec<Statistics<C>>>,
+    c_enter_count: Option<C::ValueType>,
 }
 
 impl<C: Counter + Lifecycle> Profiler<C> {
@@ -50,6 +57,7 @@ impl<C: Counter + Lifecycle> Profiler<C> {
             stack: Vec::with_capacity(1024),
             times: SplayMap::new(),
             previous_times: SplayMap::new(),
+            c_enter_count: None,
         }
     }
 
@@ -118,10 +126,12 @@ impl<C: Counter + Lifecycle> AbstractProfiler for Profiler<C> {
 
         let value = self.counter.read();
 
+        // Pause the previous function's stopwatch
         if let Some(stopwatch) = self.stack.last_mut() {
             stopwatch.pause(value);
         }
 
+        // Start a new stopwatch for the function we just entered
         self.stack.push(Stopwatch::new(value));
     }
 
@@ -147,6 +157,36 @@ impl<C: Counter + Lifecycle> AbstractProfiler for Profiler<C> {
         if let Some(stopwatch) = self.stack.last_mut() {
             stopwatch.unpause(value);
         }
+    }
+
+    fn on_c_call(&mut self, name: &str) {
+        let symbol = self.interner.get_or_intern(name);
+
+        if self.blacklist.contains(&symbol) {
+            return;
+        }
+
+        self.c_enter_count = Some(self.counter.read());
+    }
+
+    fn on_c_return(&mut self, name: &str) {
+        let symbol = self.interner.get_or_intern(name);
+
+        if self.blacklist.contains(&symbol) {
+            return;
+        }
+
+        let cumulative = self.counter.read() - self.c_enter_count.unwrap();
+        let stats = Statistics::<C> {
+            total: C::DifferenceType::ZERO,
+            cumulative,
+        };
+        self.previous_times.insert(symbol, vec![stats]);
+
+        self.c_enter_count = None;
+
+        // C functions blacklisted the first time they're measured
+        self.add_to_blacklist(symbol);
     }
 
     fn update(&mut self) {

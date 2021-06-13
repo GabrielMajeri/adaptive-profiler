@@ -1,4 +1,4 @@
-use std::{cell::RefCell, mem, ptr};
+use std::{cell::RefCell, ffi::CStr, mem, ptr};
 
 use pyo3::{ffi, prelude::*, types::PyString, FromPyPointer, PyContextProtocol, PyObjectProtocol};
 
@@ -116,8 +116,14 @@ impl PyContextProtocol for AdaptiveProfiler {
 
 const PY_TRACE_CALL: i32 = 0;
 const PY_TRACE_RETURN: i32 = 3;
-// const PY_TRACE_C_CALL: i32 = 4;
-// const PY_TRACE_C_RETURN: i32 = 6;
+const PY_TRACE_C_CALL: i32 = 4;
+const PY_TRACE_C_RETURN: i32 = 6;
+
+#[repr(C)]
+struct PyCFunctionObject {
+    _head: ffi::PyObject,
+    def: *mut ffi::PyMethodDef,
+}
 
 /// Function called by the Python interpreter whenever a function
 /// is called or returns.
@@ -125,21 +131,29 @@ extern "C" fn profiler_callback(
     _obj: *mut ffi::PyObject,
     frame: *mut ffi::PyFrameObject,
     event: i32,
-    _arg: *mut ffi::PyObject,
+    arg: *mut ffi::PyObject,
 ) -> i32 {
     let py = unsafe { Python::assume_gil_acquired() };
 
-    let frame = unsafe { &*frame };
-    let code = unsafe { &*frame.f_code };
-    let name = unsafe { PyString::from_borrowed_ptr(py, code.co_name) };
-    let name = name.to_str().unwrap();
+    if event <= PY_TRACE_RETURN {
+        let frame = unsafe { &*frame };
+        let code = unsafe { &*frame.f_code };
+        let name = unsafe { PyString::from_borrowed_ptr(py, code.co_name) };
+        let name = name.to_str().unwrap();
 
-    match event {
-        PY_TRACE_CALL => with_profiler(|profiler| profiler.on_call(name)),
-        PY_TRACE_RETURN => with_profiler(|profiler| profiler.on_return(name)),
-        // PY_TRACE_C_CALL => with_profiler(|p| p.on_call(name)),
-        // PY_TRACE_C_RETURN => with_profiler(|p| p.on_return(name)),
-        _ => (),
+        match event {
+            PY_TRACE_CALL => with_profiler(|profiler| profiler.on_call(name)),
+            PY_TRACE_RETURN => with_profiler(|profiler| profiler.on_return(name)),
+            _ => (),
+        }
+    } else {
+        let arg: *mut PyCFunctionObject = arg.cast();
+        let c_fn_name = unsafe { CStr::from_ptr((*(*arg).def).ml_name).to_str().unwrap() };
+        match event {
+            PY_TRACE_C_CALL => with_profiler(|p| p.on_c_call(c_fn_name)),
+            PY_TRACE_C_RETURN => with_profiler(|p| p.on_c_return(c_fn_name)),
+            _ => (),
+        }
     }
 
     0
