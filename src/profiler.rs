@@ -5,13 +5,17 @@ use std::{
 
 use splay::{SplayMap, SplaySet};
 
-type Symbol = string_interner::symbol::SymbolU32;
-type StringInterner = string_interner::StringInterner<Symbol>;
+pub(crate) type Symbol = string_interner::symbol::SymbolU32;
+pub(crate) type StringInterner = string_interner::StringInterner<Symbol>;
+
+type Blacklist = SplaySet<Symbol>;
+pub(crate) type SamplesMap<C> = SplayMap<Symbol, Vec<Statistics<C>>>;
 
 use crate::{
     counter::{Counter, IntoU128, Zero},
     lifecycle::Lifecycle,
     stopwatch::{Statistics, Stopwatch},
+    update::{create_algorithm, Algorithm, UpdateAlgorithm},
     FunctionStatistics,
 };
 
@@ -39,11 +43,12 @@ pub trait AbstractProfiler: Lifecycle {
 /// Should be kept in a thread-local variable.
 pub struct Profiler<C: Counter + Lifecycle> {
     counter: C,
+    update_algorithm: Box<dyn UpdateAlgorithm<C>>,
     interner: StringInterner,
-    blacklist: SplaySet<Symbol>,
+    blacklist: Blacklist,
     stack: Vec<Stopwatch<C>>,
-    times: SplayMap<Symbol, Vec<Statistics<C>>>,
-    previous_times: SplayMap<Symbol, Vec<Statistics<C>>>,
+    samples: SamplesMap<C>,
+    previous_samples: SamplesMap<C>,
     c_enter_count: Option<C::ValueType>,
 }
 
@@ -52,34 +57,34 @@ impl<C: Counter + Lifecycle> Profiler<C> {
     pub fn new(counter: C) -> Self {
         Self {
             counter,
+            update_algorithm: create_algorithm(Algorithm::Racing),
             interner: StringInterner::new(),
             blacklist: SplaySet::new(),
             stack: Vec::with_capacity(1024),
-            times: SplayMap::new(),
-            previous_times: SplayMap::new(),
+            samples: SplayMap::new(),
+            previous_samples: SplayMap::new(),
             c_enter_count: None,
         }
     }
 
     fn add_to_blacklist(&mut self, symbol: Symbol) {
-        let current_times = self.times.remove(&symbol).unwrap_or_default();
+        let current_samples = self.samples.remove(&symbol).unwrap_or_default();
 
-        if let Some(previous_times) = self.previous_times.get_mut(&symbol) {
-            previous_times.extend(current_times);
+        if let Some(previous_samples) = self.previous_samples.get_mut(&symbol) {
+            previous_samples.extend(current_samples);
         } else {
-            self.previous_times.insert(symbol, current_times);
+            self.previous_samples.insert(symbol, current_samples);
         }
 
         self.blacklist.insert(symbol);
     }
 
     fn record_statistics(&mut self, symbol: Symbol, stats: Statistics<C>) {
-        if !self.times.contains_key(&symbol) {
-            self.times.insert(symbol, Vec::new());
+        if !self.samples.contains_key(&symbol) {
+            self.samples.insert(symbol, Vec::new());
         }
 
-        let times = self.times.get_mut(&symbol).unwrap();
-        times.push(stats);
+        self.samples.get_mut(&symbol).unwrap().push(stats);
     }
 
     #[allow(dead_code)]
@@ -91,7 +96,7 @@ impl<C: Counter + Lifecycle> Profiler<C> {
         let mut file = BufWriter::new(file);
 
         // Write statistics for each function on a new line
-        for (symbol, values) in self.times.clone().into_iter() {
+        for (symbol, values) in self.samples.clone().into_iter() {
             let fn_name = self.interner.resolve(symbol).unwrap();
 
             writeln!(file, "{}", fn_name)?;
@@ -181,7 +186,7 @@ impl<C: Counter + Lifecycle> AbstractProfiler for Profiler<C> {
             total: C::DifferenceType::ZERO,
             cumulative,
         };
-        self.previous_times.insert(symbol, vec![stats]);
+        self.previous_samples.insert(symbol, vec![stats]);
 
         self.c_enter_count = None;
 
@@ -190,96 +195,21 @@ impl<C: Counter + Lifecycle> AbstractProfiler for Profiler<C> {
     }
 
     fn update(&mut self) {
-        // No function calls were recorded
-        if self.times.is_empty() {
-            return;
-        }
+        let newly_blacklisted = self.update_algorithm.update(&self.interner, &self.samples);
 
-        let times = self.times.clone();
-
-        // There is only one function left
-        if self.times.len() == 1 {
-            let entry = times.into_iter().next().unwrap();
-            let symbol = entry.0;
+        for symbol in newly_blacklisted {
             self.add_to_blacklist(symbol);
-            println!(
-                "Blacklisting last remaining function: {}",
-                self.interner.resolve(symbol).unwrap()
-            );
-            return;
-        }
-
-        let mut stats = Vec::with_capacity(self.interner.len());
-
-        for (symbol, values) in self.times.clone().into_iter() {
-            let mut values: Vec<_> = values
-                .into_iter()
-                .map(|v| v.cumulative.into_u128())
-                .collect();
-
-            let mut min = u128::MAX;
-            let mut max = u128::MIN;
-            if values.len() < 10 {
-                // If we don't have enough samples to extract a confidence interval,
-                // just use any value available.
-                let value = values.first().unwrap().clone();
-                min = value;
-                max = value;
-            } else {
-                // Sort the running times
-                values.sort_unstable();
-
-                // Drop the first and last 5%
-                let percent = 0.05;
-                let n = values.len() as f64;
-                let start = (percent * n) as usize;
-                let end = ((1.0 - percent) * n) as usize;
-
-                let values = &values[start..end];
-
-                for value in values.into_iter().copied() {
-                    if value > max {
-                        max = value;
-                    }
-                    if value < min {
-                        min = value;
-                    }
-                }
-            }
-
-            let mean = min + (max - min) / 2;
-            stats.push(FunctionAggregateStatistics {
-                symbol,
-                min,
-                max,
-                mean,
-            })
-        }
-        let stats = stats;
-
-        // Find the function with the smallest average runtime
-        let smallest_runtime = stats.iter().min_by_key(|stats| stats.mean).unwrap();
-
-        let should_blacklist = stats
-            .iter()
-            .filter(|stats| stats.symbol != smallest_runtime.symbol)
-            .all(|stats| smallest_runtime.max < stats.min);
-
-        if should_blacklist {
-            self.add_to_blacklist(smallest_runtime.symbol);
-            let fn_name = self.interner.resolve(smallest_runtime.symbol).unwrap();
-            println!("Blacklisting {}", fn_name);
         }
     }
 
     /// Returns a vector of the profiling statistics gathered so far.
     fn get_statistics(&mut self) -> Vec<FunctionStatistics> {
-        // Move all values to the `previous_times` map.
-        for (key, _) in self.times.clone().into_iter() {
+        // Move all values to the previous samples map.
+        for (key, _) in self.samples.clone().into_iter() {
             self.add_to_blacklist(key);
         }
 
-        self.previous_times
+        self.previous_samples
             .clone()
             .into_iter()
             .map(|(sym, times)| {
@@ -296,12 +226,4 @@ impl<C: Counter + Lifecycle> AbstractProfiler for Profiler<C> {
             })
             .collect()
     }
-}
-
-#[derive(Debug, Copy, Clone)]
-struct FunctionAggregateStatistics {
-    symbol: Symbol,
-    min: u128,
-    max: u128,
-    mean: u128,
 }

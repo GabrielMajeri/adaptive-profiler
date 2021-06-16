@@ -13,6 +13,8 @@ mod perfcnt;
 
 mod time;
 
+mod update;
+
 mod profiler;
 use crate::profiler::{AbstractProfiler, Profiler};
 
