@@ -87,7 +87,10 @@ def parse(output: str) -> List[FunctionStatistics]:
     for line in non_empty[3:]:
         elems = line.split()
 
-        num_calls = int(elems[0])
+        if '/' in elems[0]:
+            num_calls = int(elems[0].split('/')[1])
+        else:
+            num_calls = int(elems[0])
         total_time = float(elems[1])
         total_time_per_call = float(elems[2])
         cumulative_time = float(elems[3])
