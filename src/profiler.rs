@@ -181,7 +181,8 @@ impl<C: Counter + Lifecycle> AbstractProfiler for Profiler<C> {
             return;
         }
 
-        let cumulative = self.counter.read() - self.c_enter_count.unwrap();
+        let now = self.counter.read();
+        let cumulative = now - self.c_enter_count.unwrap_or(now);
         let stats = Statistics::<C> {
             total: C::DifferenceType::ZERO,
             cumulative,
