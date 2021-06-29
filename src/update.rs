@@ -3,6 +3,7 @@ use crate::{
     profiler::{SamplesMap, StringInterner, Symbol},
 };
 
+#[allow(dead_code)]
 pub enum Algorithm {
     Noop,
     Racing,
@@ -11,7 +12,7 @@ pub enum Algorithm {
 pub fn create_algorithm<C: Counter>(algorithm: Algorithm) -> Box<dyn UpdateAlgorithm<C>> {
     match algorithm {
         Algorithm::Noop => Box::new(NoopAlgorithm),
-        Algorithm::Racing => Box::new(RacingAlgorithm),
+        Algorithm::Racing => Box::new(RacingAlgorithm::new()),
     }
 }
 
@@ -37,11 +38,26 @@ impl<C: Counter> UpdateAlgorithm<C> for NoopAlgorithm {
 }
 
 #[non_exhaustive]
-pub struct RacingAlgorithm;
+pub struct RacingAlgorithm {
+    disable_updates: bool,
+}
+
+impl RacingAlgorithm {
+    pub fn new() -> Self {
+        RacingAlgorithm {
+            disable_updates: false,
+        }
+    }
+}
 
 impl<C: Counter> UpdateAlgorithm<C> for RacingAlgorithm {
     fn update(&mut self, interner: &StringInterner, samples: &SamplesMap<C>) -> Vec<Symbol> {
         let mut blacklist = Vec::new();
+
+        // Algorithm disengaged itself
+        if self.disable_updates {
+            return blacklist;
+        }
 
         // No function calls were recorded
         if samples.is_empty() {
@@ -109,7 +125,6 @@ impl<C: Counter> UpdateAlgorithm<C> for RacingAlgorithm {
             })
         }
         let stats = stats;
-
         // Find the function with the smallest average runtime
         let smallest_runtime = stats.iter().min_by_key(|stats| stats.mean).unwrap();
 
@@ -124,6 +139,9 @@ impl<C: Counter> UpdateAlgorithm<C> for RacingAlgorithm {
 
             let fn_name = interner.resolve(symbol).unwrap();
             println!("Blacklisting {}", fn_name);
+        } else {
+            // Not blacklisting anything means we can't reduce profiling overhead any further
+            self.disable_updates = true;
         }
 
         return blacklist;
