@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+
 from adaptive_profiler import AdaptiveProfiler
 
 parser = argparse.ArgumentParser(
@@ -10,7 +11,6 @@ parser.add_argument(
     'path', type=str,
     help='path to the program to profile')
 
-# TODO: hook up to profiler constructor
 parser.add_argument(
     '--resource', choices=['time', 'cache_misses', 'branch_misses'],
     default='time',
@@ -23,11 +23,13 @@ parser.add_argument(
 
 args = parser.parse_args()
 
-profiler = AdaptiveProfiler()
+profiler = AdaptiveProfiler(resource=args.resource)
 for i in range(args.runs):
     with profiler:
         module = __import__(args.path)
     profiler.update()
 
-for stats in profiler.get_statistics():
-    print(stats)
+stats = profiler.get_statistics()
+stats.sort(key=lambda s: s.total, reverse=True)
+for fn_stats in stats:
+    print(fn_stats)

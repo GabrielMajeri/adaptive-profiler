@@ -62,11 +62,26 @@ pub struct AdaptiveProfiler {}
 #[pymethods]
 impl AdaptiveProfiler {
     #[new]
-    fn new() -> Self {
-        let counter = crate::time::TimeCounter;
-        //let counter = crate::perfcnt::HardwarePerformanceCounter::cache_misses();
-        let profiler = Profiler::new(counter);
-        PROFILER.with(|p| p.replace(Some(Box::new(profiler))));
+    fn new(resource: Option<&str>) -> Self {
+        let profiler: Box<dyn AbstractProfiler> = match resource.unwrap_or("time") {
+            "time" => {
+                let counter = crate::time::TimeCounter;
+                let profiler = Profiler::new(counter);
+                Box::new(profiler)
+            }
+            "cache_misses" => {
+                let counter = crate::perfcnt::HardwarePerformanceCounter::cache_misses();
+                let profiler = Profiler::new(counter);
+                Box::new(profiler)
+            }
+            "branch_misses" => {
+                let counter = crate::perfcnt::HardwarePerformanceCounter::branch_misses();
+                let profiler = Profiler::new(counter);
+                Box::new(profiler)
+            }
+            resource => panic!("Unknown resource type: '{}'", resource),
+        };
+        PROFILER.with(|p| p.replace(Some(profiler)));
         Self {}
     }
 
