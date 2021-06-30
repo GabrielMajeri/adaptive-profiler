@@ -50,32 +50,35 @@ def run_benchmark(benchmark: Benchmark):
     print(f'cProfile duration: {cprofile_timer.total_time} ns')
     print(f'Adaptive profiler duration: {adaprof_timer.total_time} ns')
 
-    # output = capture_stats_output(profile)
-    # cprofile_stats = parse(output)
+    print_function_stats = False
 
-    # adaprof_stats = adaprof.get_statistics()
+    if print_function_stats:
+        output = capture_stats_output(profile)
+        cprofile_stats = parse(output)
 
-    # print('cProfile stats')
-    # for stat in cprofile_stats:
-    #     print(stat)
+        adaprof_stats = adaprof.get_statistics()
 
-    # print('Adaptive profiler stats')
-    # for stat in adaprof_stats:
-    #     print(stat)
+        print('cProfile stats')
+        for stat in cprofile_stats:
+            print(stat)
 
-    # print('Time percentages')
+        print('Adaptive profiler stats')
+        for stat in adaprof_stats:
+            print(stat)
 
-    # print("cProfile:")
-    # cprofile_stats.sort(key=lambda s: s.total, reverse=True)
-    # for stat in cprofile_stats:
-    #     print(f'{stat.name}:', stat.cumulative / stat.num_calls)
+        print('Time percentages')
 
-    # print("Adaptive profiler:")
-    # adaprof_stats.sort(key=lambda s: s.total, reverse=True)
-    # for stat in adaprof_stats:
-    #     print(f'{stat.name}:', stat.cumulative / stat.num_calls)
+        print("cProfile:")
+        cprofile_stats.sort(key=lambda s: s.total, reverse=True)
+        for stat in cprofile_stats:
+            print(f'{stat.name}:', stat.cumulative / stat.num_calls)
 
-    # print()
+        print("Adaptive profiler:")
+        adaprof_stats.sort(key=lambda s: s.total, reverse=True)
+        for stat in adaprof_stats:
+            print(f'{stat.name}:', stat.cumulative / stat.num_calls)
+
+        print()
 
     cprofile_overhead = cprofile_timer.total_time / no_profiling_timer.total_time
     base_overhead = adaprof_timer.total_time / no_profiling_timer.total_time
